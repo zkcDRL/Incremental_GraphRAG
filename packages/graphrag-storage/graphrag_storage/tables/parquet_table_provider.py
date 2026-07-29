@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Parquet-based table provider implementation."""
+"""基于 Parquet 的表提供者实现。"""
 
 import logging
 import re
@@ -18,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 class ParquetTableProvider(TableProvider):
-    """Table provider that stores tables as Parquet files using an underlying Storage instance.
+    """使用底层 Storage 实例将表保存为 Parquet 文件的表提供者。
 
-    This provider converts between pandas DataFrames and Parquet format,
-    storing the data through a Storage backend (file, blob, cosmos, etc.).
-    """
+该提供者负责在 pandas DataFrame 与 Parquet 格式之间转换，
+并通过 Storage 后端（文件、Blob、Cosmos 等）持久化数据。
+"""
 
     def __init__(self, storage: Storage, **kwargs) -> None:
         """Initialize the Parquet table provider with an underlying storage instance.

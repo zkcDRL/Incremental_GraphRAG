@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Cosmos DB implementation of the Table abstraction for streaming row access."""
+"""用于逐行流式访问的 Cosmos DB 表抽象实现。"""
 
 from __future__ import annotations
 
@@ -25,18 +25,18 @@ _DEFAULT_BATCH_SIZE = 50
 
 
 def _identity(row: dict[str, Any]) -> Any:
-    """Return row unchanged (default transformer)."""
+    """原样返回行数据，作为默认转换器。"""
     return row
 
 
 def _apply_transformer(transformer: RowTransformer, row: dict[str, Any]) -> Any:
-    """Apply transformer, handling both callables and classes (e.g. Pydantic models)."""
+    """对行应用转换器，兼容可调用对象与类（如 Pydantic 模型）。"""
     if inspect.isclass(transformer):
         return transformer(**row)
     return transformer(row)
 
 
-# Cosmos system properties to strip from returned rows.
+# 需从返回行中移除的 Cosmos 系统属性。
 _COSMOS_SYSTEM_KEYS = frozenset({
     "_rid",
     "_self",
@@ -49,21 +49,20 @@ _COSMOS_SYSTEM_KEYS = frozenset({
 
 
 def _strip_cosmos_metadata(doc: dict[str, Any]) -> dict[str, Any]:
-    """Remove Cosmos system properties and restore original id."""
+    """移除 Cosmos 系统属性并恢复原始 ID。"""
     result = {k: v for k, v in doc.items() if k not in _COSMOS_SYSTEM_KEYS}
-    # Restore the pipeline's original id from row_id if present.
+    # 若存在 row_id，则恢复管线原始 ID。
     if "row_id" in result:
         result["id"] = result.pop("row_id")
     return result
 
 
 class CosmosTable(Table):
-    """Streaming table interface backed by Cosmos DB.
+    """由 Cosmos DB 支持的流式表接口。
 
-    Reads page through query_items() using the async SDK, yielding rows
-    one at a time.  Writes accumulate in memory and are bulk-upserted on
-    close().
-    """
+通过异步 SDK 的 query_items() 分页读取，每次产出一行；写入会先在内存中累积，
+并在 close() 时批量 upsert。
+"""
 
     def __init__(
         self,

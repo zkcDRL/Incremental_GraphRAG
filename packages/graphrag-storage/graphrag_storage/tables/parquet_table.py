@@ -1,7 +1,7 @@
 # Copyright (C) 2025 Microsoft
 # Licensed under the MIT License
 
-"""A Parquet-based implementation of the Table abstraction with simulated streaming."""
+"""基于 Parquet、模拟流式访问的表抽象实现。"""
 
 from __future__ import annotations
 
@@ -20,32 +20,26 @@ if TYPE_CHECKING:
 
 
 def _identity(row: dict[str, Any]) -> Any:
-    """Return row unchanged (default transformer)."""
+    """原样返回行数据，作为默认转换器。"""
     return row
 
 
 def _apply_transformer(transformer: RowTransformer, row: dict[str, Any]) -> Any:
-    """Apply transformer to row, handling both callables and classes.
-
-    If transformer is a class (e.g., Pydantic model), calls it with **row.
-    Otherwise calls it with row as positional argument.
-    """
+    """对行应用转换器，兼容可调用对象与类。"""
     if inspect.isclass(transformer):
         return transformer(**row)
     return transformer(row)
 
 
 class ParquetTable(Table):
-    """Simulated streaming interface for Parquet tables.
+    """Parquet 表的模拟流式访问接口。
 
-    Parquet format doesn't support true row-by-row streaming, so this
-    implementation simulates streaming via:
-    - Read: Loads DataFrame, yields rows via iterrows()
-    - Write: Accumulates rows in memory, writes all at once on close()
+Parquet 格式不支持真正的逐行流式读写，因此本实现通过以下方式模拟：
+- 读取：加载 DataFrame 后经由 iterrows() 逐行产出
+- 写入：在内存中累积行，并在 close() 时一次性写入
 
-    This provides API compatibility with CSVTable while maintaining
-    Parquet's performance characteristics for bulk operations.
-    """
+这使其在保持 Parquet 批量操作性能特征的同时，兼容 CSVTable 的 API。
+"""
 
     def __init__(
         self,

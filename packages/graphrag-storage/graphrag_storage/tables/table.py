@@ -1,7 +1,7 @@
 # Copyright (C) 2025 Microsoft
 # Licensed under the MIT License
 
-"""Table abstraction for streaming row-by-row access."""
+"""支持逐行流式访问的表抽象。"""
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
@@ -14,15 +14,14 @@ RowTransformer = Callable[[dict[str, Any]], Any]
 
 
 class Table(ABC):
-    """Abstract base class for streaming table access.
+    """流式访问表的抽象基类。
 
-    Provides row-by-row iteration and write capabilities for memory-efficient
-    processing of large datasets. Supports async context manager protocol for
-    automatic resource cleanup.
+    提供逐行迭代与写入能力，以便内存高效地处理大型数据集，
+    并支持异步上下文管理器协议以自动释放资源。
 
     Examples
     --------
-        Reading rows as dicts:
+        将行读取为字典：
         >>> async with (
         ...     provider.open(
         ...         "documents"
@@ -33,14 +32,14 @@ class Table(ABC):
         ...     ) in table:
         ...         process(row)
 
-        With Pydantic model as transformer:
+        使用 Pydantic 模型作为转换器：
         >>> async with (
         ...     provider.open(
         ...         "entities",
         ...         Entity,
         ...     ) as table
         ... ):
-        ...     async for entity in table:  # yields Entity instances
+        ...     async for entity in table:  # 产出 Entity 实例
         ...         print(
         ...             entity.name
         ...         )
@@ -48,63 +47,62 @@ class Table(ABC):
 
     @abstractmethod
     def __aiter__(self) -> AsyncIterator[Any]:
-        """Yield rows asynchronously, transformed if transformer provided.
+        """异步产出行；提供转换器时产出转换后的结果。
 
         Yields
         ------
             Any:
-                Each row, either as dict or transformed type (e.g., Pydantic model).
+                每一行，类型为字典或转换后的对象（如 Pydantic 模型）。
         """
         ...
 
     @abstractmethod
     async def length(self) -> int:
-        """Return number of rows asynchronously.
+        """异步返回表中的行数。
 
         Returns
         -------
             int:
-                Number of rows in the table.
+                表中的行数。
         """
 
     @abstractmethod
     async def has(self, row_id: str) -> bool:
-        """Check if a row with the given ID exists.
+        """检查是否存在具有指定 ID 的行。
 
         Args
         ----
-            row_id: The ID value to search for.
+            row_id: 要查找的 ID 值。
 
         Returns
         -------
             bool:
-                True if a row with matching ID exists.
+                存在匹配 ID 的行时返回 True，否则返回 False。
         """
 
     @abstractmethod
     async def write(self, row: dict[str, Any]) -> None:
-        """Write a single row to the table.
+        """向表中写入单行数据。
 
         Args
         ----
-            row: Dictionary representing a single row to write.
+            row: 表示单行数据的字典。
         """
 
     @abstractmethod
     async def close(self) -> None:
-        """Flush buffered writes and release resources.
+        """刷新缓冲写入并释放资源。
 
-        This method is called automatically when exiting the async context
-        manager, but can also be called explicitly.
+        退出异步上下文管理器时会自动调用此方法，也可显式调用。
         """
 
     async def __aenter__(self) -> Self:
-        """Enter async context manager.
+        """进入异步上下文管理器。
 
         Returns
         -------
             Table:
-                Self for context manager usage.
+                当前实例。
         """
         return self
 
@@ -114,12 +112,12 @@ class Table(ABC):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        """Exit async context manager, ensuring close() is called.
+        """退出异步上下文管理器，并确保调用 close()。
 
         Args
         ----
-            exc_type: Exception type if an exception occurred
-            exc_val: Exception value if an exception occurred
-            exc_tb: Exception traceback if an exception occurred
+            exc_type: 发生异常时的异常类型。
+            exc_val: 发生异常时的异常值。
+            exc_tb: 发生异常时的异常回溯。
         """
         await self.close()

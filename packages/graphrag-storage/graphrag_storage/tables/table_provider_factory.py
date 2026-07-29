@@ -2,7 +2,7 @@
 # Licensed under the MIT License
 
 
-"""Storage factory implementation."""
+"""表提供者工厂实现。"""
 
 from collections.abc import Callable
 
@@ -15,7 +15,7 @@ from graphrag_storage.tables.table_type import TableType
 
 
 class TableProviderFactory(Factory[TableProvider]):
-    """A factory class for table storage implementations."""
+    """用于创建表存储实现的工厂类。"""
 
 
 table_provider_factory = TableProviderFactory()
@@ -26,14 +26,12 @@ def register_table_provider(
     table_initializer: Callable[..., TableProvider],
     scope: ServiceScope = "transient",
 ) -> None:
-    """Register a custom storage implementation.
+    """注册自定义表存储实现。
 
     Args
     ----
-        - table_type: str
-            The table type id to register.
-        - table_initializer: Callable[..., TableProvider]
-            The table initializer to register.
+        - table_type: 要注册的表类型标识。
+        - table_initializer: 要注册的表提供者初始化器。
     """
     table_provider_factory.register(table_type, table_initializer, scope)
 
@@ -41,19 +39,17 @@ def register_table_provider(
 def create_table_provider(
     config: TableProviderConfig, storage: Storage | None = None
 ) -> TableProvider:
-    """Create a table provider implementation based on the given configuration.
+    """根据给定配置创建表提供者实现。
 
     Args
     ----
-        - config: TableProviderConfig
-            The table provider configuration to use.
-        - storage: Storage | None
-            The storage implementation to use for file-based TableProviders such as Parquet and CSV.
+        - config: 要使用的表提供者配置。
+        - storage: 供 Parquet、CSV 等基于文件的表提供者使用的存储实现。
 
     Returns
     -------
         TableProvider
-            The created table provider implementation.
+            创建出的表提供者实现。
     """
     config_model = config.model_dump()
     table_type = config.type
@@ -85,10 +81,9 @@ def create_table_provider(
     if storage:
         config_model["storage"] = storage
 
-    # For CosmosDB table providers, extract connection details from the
-    # affiliated Storage instance so users only configure credentials once
-    # (on output_storage).  Table-specific fields (container_name,
-    # batch_size, legacy_container) stay on TableProviderConfig.
+    # 对 CosmosDB 表提供者，从关联的 Storage 实例中提取连接信息，
+    # 以便用户只需在 output_storage 中配置一次凭据。表专属字段
+    # （container_name、batch_size、legacy_container）仍由 TableProviderConfig 提供。
     if table_type == TableType.CosmosDB and storage is not None:
         from graphrag_storage.azure_cosmos_storage import AzureCosmosStorage
 

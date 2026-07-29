@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""CSV-based table provider implementation."""
+"""基于 CSV 的表提供者实现。"""
 
 import logging
 import re
@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class CSVTableProvider(TableProvider):
-    """Table provider that stores tables as CSV files using an underlying Storage instance.
+    """使用底层 Storage 实例将表保存为 CSV 文件的表提供者。
 
-    This provider converts between pandas DataFrames and csv format,
-    storing the data through a Storage backend (file, blob, cosmos, etc.).
-    """
+该提供者负责在 pandas DataFrame 与 CSV 格式之间转换，
+并通过 Storage 后端（文件、Blob、Cosmos 等）持久化数据。
+"""
 
     def __init__(self, storage: Storage, **kwargs) -> None:
         """Initialize the CSV table provider with an underlying storage instance.
@@ -67,7 +67,7 @@ class CSVTableProvider(TableProvider):
         try:
             logger.info("reading table from storage: %s", filename)
             csv_data = await self._storage.get(filename, as_bytes=False)
-            # Handle empty CSV (pandas can't parse files with no columns)
+            # 处理空 CSV；pandas 无法解析没有列的文件
             if not csv_data or csv_data.strip() == "":
                 return pd.DataFrame()
             return pd.read_csv(StringIO(csv_data), keep_default_na=False)

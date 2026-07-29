@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Microsoft Corporation.
 # Licensed under the MIT Licenses
 
-"""A CSV-based implementation of the Table abstraction for streaming row access."""
+"""基于 CSV 的逐行流式表访问实现。"""
 
 from __future__ import annotations
 
@@ -32,23 +32,19 @@ except OverflowError:
 
 
 def _identity(row: dict[str, Any]) -> Any:
-    """Return row unchanged (default transformer)."""
+    """原样返回行数据，作为默认转换器。"""
     return row
 
 
 def _apply_transformer(transformer: RowTransformer, row: dict[str, Any]) -> Any:
-    """Apply transformer to row, handling both callables and classes.
-
-    If transformer is a class (e.g., Pydantic model), calls it with **row.
-    Otherwise calls it with row as positional argument.
-    """
+    """对行应用转换器，兼容可调用对象与类。"""
     if inspect.isclass(transformer):
         return transformer(**row)
     return transformer(row)
 
 
 class CSVTable(Table):
-    """Row-by-row streaming interface for CSV tables."""
+    """CSV 表的逐行流式访问接口。"""
 
     def __init__(
         self,
@@ -127,7 +123,7 @@ class CSVTable(Table):
     async def has(self, row_id: str) -> bool:
         """Check if row with given ID exists."""
         async for row in self:
-            # Handle both dict and object (e.g., Pydantic model)
+            # 同时兼容字典与对象（如 Pydantic 模型）
             if isinstance(row, dict):
                 if row.get("id") == row_id:
                     return True

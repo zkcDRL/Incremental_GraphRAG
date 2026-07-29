@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Storage configuration model."""
+"""表提供者的配置模型。"""
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -9,27 +9,27 @@ from graphrag_storage.tables.table_type import TableType
 
 
 class TableProviderConfig(BaseModel):
-    """The default configuration section for table providers."""
+    """表提供者的默认配置节。"""
 
     model_config = ConfigDict(extra="allow")
-    """Allow extra fields to support custom table provider implementations."""
+    """允许额外字段，以支持自定义表提供者实现。"""
 
     type: str = Field(
-        description="The table type to use. Builtin types include 'parquet', 'csv', and 'cosmosdb'.",
+        description="要使用的表类型。内置类型包括 'parquet'、'csv' 和 'cosmosdb'。",
         default=TableType.Parquet,
     )
 
     container_name: str | None = Field(
-        description="The Cosmos DB container name for table storage.",
+        description="用于表存储的 Cosmos DB 容器名称。",
         default=None,
     )
 
     legacy_container: str | None = Field(
-        description="Optional legacy Cosmos DB container name for read-time migration fallback.",
+        description="可选的旧版 Cosmos DB 容器名称，用于读取时的迁移回退。",
         default=None,
     )
 
     batch_size: int = Field(
-        description="Number of documents per transactional batch write for Cosmos DB. Max 100.",
+        description="Cosmos DB 事务批量写入的文档数，最大为 100。",
         default=50,
     )

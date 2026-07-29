@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Abstract base class for table providers."""
+"""表提供者的抽象基类。"""
 
 from abc import ABC, abstractmethod
 from typing import Any
@@ -12,68 +12,63 @@ from graphrag_storage.tables.table import RowTransformer, Table
 
 
 class TableProvider(ABC):
-    """Provide a table-based storage interface with support for DataFrames and row dictionaries."""
+    """提供支持 DataFrame 与行字典的表存储接口。"""
 
     @abstractmethod
     def __init__(self, **kwargs: Any) -> None:
-        """Create a table provider instance.
+        """创建表提供者实例。
 
         Args
         ----
-            **kwargs: Any
-                Keyword arguments for initialization, may include underlying Storage instance.
+            **kwargs: 初始化参数，可包含底层 Storage 实例。
         """
 
     @abstractmethod
     async def read_dataframe(self, table_name: str) -> pd.DataFrame:
-        """Read entire table as a pandas DataFrame.
+        """将整张表读取为 pandas DataFrame。
 
         Args
         ----
-            table_name: str
-                The name of the table to read.
+            table_name: 要读取的表名。
 
         Returns
         -------
             pd.DataFrame:
-                The table data as a DataFrame.
+                表数据对应的 DataFrame。
         """
 
     @abstractmethod
     async def write_dataframe(self, table_name: str, df: pd.DataFrame) -> None:
-        """Write entire table from a pandas DataFrame.
+        """从 pandas DataFrame 写入整张表。
 
         Args
         ----
-            table_name: str
-                The name of the table to write.
-            df: pd.DataFrame
-                The DataFrame to write as a table.
+            table_name: 要写入的表名。
+            df: 要写入为表的 DataFrame。
         """
 
     @abstractmethod
     async def has(self, table_name: str) -> bool:
-        """Check if a table exists in the provider.
+        """检查提供者中是否存在指定表。
 
         Args
         ----
-            table_name: str
-                The name of the table to check.
+            table_name: 要检查的表名。
 
         Returns
         -------
             bool:
-                True if the table exists, False otherwise.
+                表存在时返回 True，否则返回 False。
         """
 
     @abstractmethod
     def list(self) -> list[str]:
-        """List all table names in the provider.
+        """列出提供者中的全部表名。
 
         Returns
         -------
             list[str]:
-                List of table names (without file extensions).
+                表名列表，不包含文件扩展名。
         """
 
     @abstractmethod
@@ -82,40 +77,35 @@ class TableProvider(ABC):
         table_name: str,
         transformer: RowTransformer | None = None,
         truncate: bool = True,
-    ) -> Table:  # Returns Table instance
-        """Open a table for row-by-row streaming operations.
+    ) -> Table:  # 返回 Table 实例
+        """打开一张表以进行逐行流式操作。
 
         Args
         ----
-            table_name: str
-                The name of the table to open.
-            transformer: RowTransformer | None
-                Optional transformer function to apply to each row.
-            truncate: bool
-                If True (default), truncate existing file on first write.
-                If False, append rows to existing file (DB-like behavior).
+            table_name: 要打开的表名。
+            transformer: 可选的行转换函数。
+            truncate: 为 True（默认）时，首次写入前清空已有表；
+                为 False 时，向已有表追加数据，行为类似数据库。
 
         Returns
         -------
             Table:
-                A Table instance for streaming row operations.
+                用于逐行流式操作的 Table 实例。
         """
 
     def child(self, name: str | None) -> "TableProvider":
-        """Create a namespaced child provider.
+        """创建带命名空间的子提供者。
 
-        Used by the update pipeline to isolate delta/previous table sets.
-        Default implementation returns self (no namespacing).
-        Subclasses should override to provide proper isolation.
+        更新管线使用它隔离 delta 与 previous 表集合。默认实现返回自身，
+        即不提供命名空间隔离；子类应按需覆写以提供正确的隔离能力。
 
         Args
         ----
-            name: str | None
-                The namespace name for the child provider.
+            name: 子提供者的命名空间名称。
 
         Returns
         -------
             TableProvider:
-                A child table provider instance.
+                子表提供者实例。
         """
         return self

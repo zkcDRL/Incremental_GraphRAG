@@ -1,21 +1,21 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Cosmos DB native table provider implementation.
+"""Cosmos DB 原生表提供者实现。
 
-Stores each DataFrame row as a Cosmos document, eliminating the
-parquet serialization round-trip used by ParquetTableProvider.
+将每个 DataFrame 行存为 Cosmos 文档，避免 ParquetTableProvider 所需的
+Parquet 序列化往返。
 
-Container schema
-----------------
-Partition key : /namespace
-Document id   : {table_name}:{row_key}
+容器结构
+--------
+分区键：/namespace
+文档 ID：{table_name}:{row_key}
 
-Every document carries two internal fields used for routing:
-    namespace  - partition key, set by child() hierarchy
-    table_name - discriminator for per-table queries
+每个文档包含两个用于路由的内部字段：
+    namespace  - 由 child() 层级设置的分区键
+    table_name - 用于按表查询的区分字段
 
-All queries target a single namespace partition (no cross-partition fan-out).
+全部查询均限定在单一 namespace 分区内，不会跨分区扇出。
 """
 
 from __future__ import annotations
@@ -46,13 +46,11 @@ _MAX_BATCH_SIZE = 100
 
 
 class CosmosTableProvider(TableProvider):
-    """TableProvider backed by Azure Cosmos DB (NoSQL API, async SDK).
+    """由 Azure Cosmos DB（NoSQL API、异步 SDK）支持的 TableProvider。
 
-    Each table is stored as a set of documents within a single container,
-    discriminated by the ``table_name`` field. Namespace isolation (used
-    by the update pipeline's delta/previous split) is achieved via the
-    ``/namespace`` partition key.
-    """
+每张表作为单个容器内的一组文档保存，由 ``table_name`` 字段区分。
+更新管线使用的 delta/previous 隔离通过 ``/namespace`` 分区键实现。
+"""
 
     # ------------------------------------------------------------------
     # Construction
@@ -68,7 +66,7 @@ class CosmosTableProvider(TableProvider):
         namespace: str = "",
         legacy_container: str | None = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
-        # Allow pre-built internals for child() and testing.
+        # 允许 child() 和测试传入已构建的内部对象。
         _cosmos_client: CosmosClient | None = None,
         _container: ContainerProxy | None = None,
         _legacy_container: ContainerProxy | None = None,
@@ -77,7 +75,7 @@ class CosmosTableProvider(TableProvider):
         self._batch_size = min(max(batch_size, 1), _MAX_BATCH_SIZE)
 
         if _container is not None:
-            # Fast path: child() or test injection.
+            # 快速路径：child() 或测试注入。
             self._cosmos_client = _cosmos_client
             self._container = _container
             self._legacy_container = _legacy_container
@@ -85,7 +83,7 @@ class CosmosTableProvider(TableProvider):
             self._owns_client = False
             return
 
-        # Normal construction from config values.
+        # 根据配置值执行常规初始化。
         if not database_name:
             msg = "CosmosTableProvider requires 'database_name'."
             raise ValueError(msg)
@@ -110,7 +108,7 @@ class CosmosTableProvider(TableProvider):
         self._namespace = namespace
         self._owns_client = True
 
-        # Containers are created lazily on first use via _ensure_container().
+        # 容器在首次通过 _ensure_container() 使用时延迟创建。
         self._database_name = database_name
         self._container_name = container_name
         self._legacy_container_name = legacy_container
@@ -190,7 +188,7 @@ class CosmosTableProvider(TableProvider):
         """Write *df* as documents, replacing any existing rows for this table."""
         container = await self._ensure_container()
 
-        # Delete existing documents for this table in the namespace.
+        # 删除当前命名空间内该表的既有文档。
         await self._delete_table(container, table_name)
 
         records = json.loads(
@@ -205,7 +203,7 @@ class CosmosTableProvider(TableProvider):
                 "table_name": table_name,
                 **row,
             }
-            # Preserve the pipeline's id value so it round-trips.
+            # 保留管线的原始 ID，以确保可往返还原。
             doc["row_id"] = row_key
             docs.append(doc)
 
@@ -228,7 +226,7 @@ class CosmosTableProvider(TableProvider):
         if results and results[0] > 0:
             return True
 
-        # Fallback: check legacy container.
+        # 回退检查旧版容器。
         if self._legacy_container is not None:
             return await self._legacy_table_exists(table_name)
         return False
@@ -248,7 +246,7 @@ class CosmosTableProvider(TableProvider):
             loop = None
 
         if loop and loop.is_running():
-            # We're inside an async context — create a task via a helper.
+            # 当前处于异步上下文中，通过辅助线程创建任务。
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -357,12 +355,12 @@ class CosmosTableProvider(TableProvider):
             max_item_count=_DEFAULT_PAGE_SIZE,
         ).by_page():
             async for doc in page:
-                # Strip the "{prefix}:" from the id.
+                # 从 ID 中移除 "{prefix}:" 前缀。
                 raw_id = doc.get("id", "")
                 if ":" in raw_id:
                     doc["id"] = raw_id.split(":", 1)[1]
 
-                # Reverse entity-specific hacks.
+                # 还原实体专用的兼容处理。
                 if table_name == "entities" and "entity_id" in doc:
                     doc["id"] = doc.pop("entity_id")
 
