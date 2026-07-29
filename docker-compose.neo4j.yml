@@ -1,0 +1,23 @@
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: graphrag-neo4j
+    restart: unless-stopped
+    env_file:
+      - .env.neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
