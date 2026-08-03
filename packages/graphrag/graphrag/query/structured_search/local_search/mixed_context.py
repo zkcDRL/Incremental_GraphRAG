@@ -3,6 +3,7 @@
 """Algorithms to build context data for local search prompt."""
 
 import logging
+from collections.abc import Callable
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +40,12 @@ from graphrag.query.context_builder.source_context import (
     build_text_unit_context,
     count_relationships,
 )
+from graphrag.query.input.loaders.dfs import (
+    read_community_reports,
+    read_entities,
+    read_relationships,
+    read_text_units,
+)
 from graphrag.query.input.retrieval.community_reports import (
     get_candidate_communities,
 )
@@ -65,6 +72,7 @@ class LocalSearchMixedContext(LocalContextBuilder):
         covariates: dict[str, list[Covariate]] | None = None,
         tokenizer: Tokenizer | None = None,
         embedding_vectorstore_key: str = EntityVectorStoreKey.ID,
+        graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
     ):
         if community_reports is None:
             community_reports = []
@@ -87,6 +95,57 @@ class LocalSearchMixedContext(LocalContextBuilder):
         self.text_embedder = text_embedder
         self.tokenizer = tokenizer or get_tokenizer()
         self.embedding_vectorstore_key = embedding_vectorstore_key
+        self.graph_context_loader = graph_context_loader
+
+    def _load_graph_context(self, seed_entity_ids: list[str]) -> None:
+        """Replace relation-backed context with records selected by the graph."""
+        if self.graph_context_loader is None:
+            return
+        context = self.graph_context_loader(seed_entity_ids)
+        entities = context["entities"]
+        relationships = context["relationships"]
+        text_units = context["text_units"]
+        communities = context["communities"]
+        reports = context["community_reports"]
+        if not entities.empty:
+            self.entities = {
+                entity.id: entity
+                for entity in read_entities(
+                    entities,
+                    community_col=None,
+                    rank_col="degree",
+                    name_embedding_col=None,
+                    description_embedding_col=None,
+                )
+            }
+        if not communities.empty:
+            memberships = {
+                str(entity_id): str(community_id)
+                for community_id, entity_ids in communities.loc[:, ["community", "entity_ids"]].itertuples(index=False)
+                for entity_id in entity_ids
+            }
+            for entity in self.entities.values():
+                if entity.id in memberships:
+                    entity.community_ids = [memberships[entity.id]]
+        if not relationships.empty:
+            self.relationships = {
+                relationship.id: relationship
+                for relationship in read_relationships(
+                    relationships,
+                    rank_col="combined_degree",
+                    description_embedding_col=None,
+                )
+            }
+        if not text_units.empty:
+            self.text_units = {
+                unit.id: unit
+                for unit in read_text_units(text_units, covariates_col=None)
+            }
+        if not reports.empty:
+            self.community_reports = {
+                report.community_id: report
+                for report in read_community_reports(reports)
+            }
 
     def build_context(
         self,
@@ -147,6 +206,12 @@ class LocalSearchMixedContext(LocalContextBuilder):
             k=top_k_mapped_entities,
             oversample_scaler=2,
         )
+        self._load_graph_context([entity.id for entity in selected_entities])
+        selected_entities = [
+            self.entities[entity.id]
+            for entity in selected_entities
+            if entity.id in self.entities
+        ]
 
         # build context
         final_context = list[str]()

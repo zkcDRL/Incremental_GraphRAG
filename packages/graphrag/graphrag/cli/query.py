@@ -6,8 +6,9 @@
 import asyncio
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import pandas as pd
 from graphrag_storage import create_storage
 from graphrag_storage.tables.table_provider_factory import create_table_provider
 
@@ -16,9 +17,6 @@ from graphrag.callbacks.noop_query_callbacks import NoopQueryCallbacks
 from graphrag.config.load_config import load_config
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.data_model.data_reader import DataReader
-
-if TYPE_CHECKING:
-    import pandas as pd
 
 # ruff: noqa: T201
 
@@ -130,20 +128,39 @@ def run_local_search(
         root_dir=root_dir,
         cli_overrides=cli_overrides,
     )
+    graph_context_loader = None
+    if config.table_provider.type == "neo4j":
+        table_provider = create_table_provider(config.table_provider)
+        graph_context_loader = table_provider.read_local_search_context
 
-    dataframe_dict = _resolve_output_files(
-        config=config,
-        output_list=[
-            "communities",
-            "community_reports",
-            "text_units",
-            "relationships",
-            "entities",
-        ],
-        optional_list=[
-            "covariates",
-        ],
-    )
+    if config.table_provider.type == "neo4j":
+        dataframe_dict = _resolve_output_files(
+            config=config,
+            output_list=["entities"],
+        )
+        dataframe_dict.update(
+            {
+                "communities": pd.DataFrame(),
+                "community_reports": pd.DataFrame(),
+                "text_units": pd.DataFrame(),
+                "relationships": pd.DataFrame(),
+                "covariates": None,
+            }
+        )
+    else:
+        dataframe_dict = _resolve_output_files(
+            config=config,
+            output_list=[
+                "communities",
+                "community_reports",
+                "text_units",
+                "relationships",
+                "entities",
+            ],
+            optional_list=[
+                "covariates",
+            ],
+        )
 
     communities: pd.DataFrame = dataframe_dict["communities"]
     community_reports: pd.DataFrame = dataframe_dict["community_reports"]
@@ -177,6 +194,7 @@ def run_local_search(
                 response_type=response_type,
                 query=query,
                 callbacks=[callbacks],
+                graph_context_loader=graph_context_loader,
                 verbose=verbose,
             ):
                 full_response += stream_chunk
@@ -199,6 +217,7 @@ def run_local_search(
             community_level=community_level,
             response_type=response_type,
             query=query,
+            graph_context_loader=graph_context_loader,
             verbose=verbose,
         )
     )

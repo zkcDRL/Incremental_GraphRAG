@@ -3,6 +3,9 @@
 
 """Query Factory methods to support CLI."""
 
+from collections.abc import Callable
+
+import pandas as pd
 from graphrag_llm.completion import create_completion
 from graphrag_llm.embedding import create_embedding
 from graphrag_vectors import VectorStore
@@ -45,6 +48,7 @@ def get_local_search_engine(
     description_embedding_store: VectorStore,
     system_prompt: str | None = None,
     callbacks: list[QueryCallbacks] | None = None,
+    graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
 ) -> LocalSearch:
     """Create a local search engine based on data + configuration."""
     model_settings = config.get_completion_model_config(
@@ -78,6 +82,7 @@ def get_local_search_engine(
             embedding_vectorstore_key=EntityVectorStoreKey.ID,  # if the vectorstore uses entity title as ids, set this to EntityVectorStoreKey.TITLE
             text_embedder=embedding_model,
             tokenizer=tokenizer,
+            graph_context_loader=graph_context_loader,
         ),
         tokenizer=tokenizer,
         model_params=model_params,

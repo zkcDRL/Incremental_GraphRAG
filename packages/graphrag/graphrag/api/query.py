@@ -18,7 +18,7 @@ Backwards compatibility is not guaranteed at this time.
 """
 
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import pandas as pd
@@ -48,6 +48,7 @@ from graphrag.query.indexer_adapters import (
     read_indexer_reports,
     read_indexer_text_units,
 )
+from graphrag.query.input.loaders.dfs import read_entities
 from graphrag.utils.api import (
     get_embedding_store,
     load_search_prompt,
@@ -200,6 +201,7 @@ async def local_search(
     response_type: str,
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
+    graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
     verbose: bool = False,
 ) -> tuple[
     str | dict[str, Any] | list[dict[str, Any]],
@@ -249,6 +251,7 @@ async def local_search(
         response_type=response_type,
         query=query,
         callbacks=callbacks,
+        graph_context_loader=graph_context_loader,
     ):
         full_response += chunk
     logger.debug("Query response: %s", truncate(full_response, 400))
@@ -268,6 +271,7 @@ def local_search_streaming(
     response_type: str,
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
+    graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
     verbose: bool = False,
 ) -> AsyncGenerator:
     """Perform a local search and return the context data and response via a generator.
@@ -298,22 +302,38 @@ def local_search_streaming(
         embedding_name=entity_description_embedding,
     )
 
-    entities_ = read_indexer_entities(entities, communities, community_level)
+    if graph_context_loader is None:
+        entities_ = read_indexer_entities(entities, communities, community_level)
+        reports = read_indexer_reports(community_reports, communities, community_level)
+        text_units_ = read_indexer_text_units(text_units)
+        relationships_ = read_indexer_relationships(relationships)
+    else:
+        entities_ = read_entities(
+            entities,
+            community_col=None,
+            rank_col="degree",
+            name_embedding_col=None,
+            description_embedding_col=None,
+        )
+        reports = []
+        text_units_ = []
+        relationships_ = []
     covariates_ = read_indexer_covariates(covariates) if covariates is not None else []
     prompt = load_search_prompt(config.local_search.prompt)
 
     logger.debug("Executing streaming local search query: %s", query)
     search_engine = get_local_search_engine(
         config=config,
-        reports=read_indexer_reports(community_reports, communities, community_level),
-        text_units=read_indexer_text_units(text_units),
+        reports=reports,
+        text_units=text_units_,
         entities=entities_,
-        relationships=read_indexer_relationships(relationships),
+        relationships=relationships_,
         covariates={"claims": covariates_},
         description_embedding_store=description_embedding_store,
         response_type=response_type,
         system_prompt=prompt,
         callbacks=callbacks,
+        graph_context_loader=graph_context_loader,
     )
     return search_engine.stream_search(query=query)
 

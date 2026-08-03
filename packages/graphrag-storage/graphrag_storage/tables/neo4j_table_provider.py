@@ -178,6 +178,96 @@ class Neo4jTableProvider(TableProvider):
 
         await self._refresh_domain_relationships(table_name, df)
 
+    def read_local_search_context(
+        self, seed_entity_ids: list[str]
+    ) -> dict[str, pd.DataFrame]:
+        """Load graph-filtered records into the local search context."""
+        if not seed_entity_ids:
+            return {
+                name: pd.DataFrame()
+                for name in (
+                    "entities",
+                    "relationships",
+                    "text_units",
+                    "communities",
+                    "community_reports",
+                )
+            }
+
+        with self._list_driver.session(database=self._database) as session:
+            entity_rows = [
+                record["data"]
+                for record in session.run(
+                    "MATCH (seed:Entity {namespace: $namespace}) "
+                    "WHERE seed.row_id IN $seed_ids "
+                    "OPTIONAL MATCH (seed)-[:RELATED]-(neighbor:Entity {namespace: $namespace}) "
+                    "WITH collect(DISTINCT seed) + collect(DISTINCT neighbor) AS nodes "
+                    "UNWIND nodes AS node WITH DISTINCT node WHERE node IS NOT NULL "
+                    "RETURN node.data AS data",
+                    namespace=self._namespace,
+                    seed_ids=seed_entity_ids,
+                )
+            ]
+            entity_ids = [str(json.loads(row)["id"]) for row in entity_rows]
+            relationship_rows = [
+                record["data"]
+                for record in session.run(
+                    "MATCH (source:Entity {namespace: $namespace})-[edge:RELATED]-"
+                    "(target:Entity {namespace: $namespace}) "
+                    "WHERE edge.id IS NOT NULL "
+                    "AND (source.row_id IN $entity_ids OR target.row_id IN $entity_ids) "
+                    "MATCH (relationship:Relationship {namespace: $namespace, row_id: edge.id}) "
+                    "RETURN DISTINCT relationship.data AS data",
+                    namespace=self._namespace,
+                    entity_ids=entity_ids,
+                )
+            ]
+            relationship_ids = [str(json.loads(row)["id"]) for row in relationship_rows]
+            text_unit_rows = [
+                record["data"]
+                for record in session.run(
+                    "MATCH (text_unit:TextUnit {namespace: $namespace}) "
+                    "OPTIONAL MATCH (text_unit)-[:MENTIONS]->(entity:Entity {namespace: $namespace}) "
+                    "OPTIONAL MATCH (text_unit)-[:EVIDENCES]->"
+                    "(relationship:Relationship {namespace: $namespace}) "
+                    "WITH text_unit, collect(entity.row_id) AS entity_ids, "
+                    "collect(relationship.row_id) AS relationship_ids "
+                    "WHERE any(id IN entity_ids WHERE id IN $entity_ids) "
+                    "OR any(id IN relationship_ids WHERE id IN $relationship_ids) "
+                    "RETURN DISTINCT text_unit.data AS data",
+                    namespace=self._namespace,
+                    entity_ids=entity_ids,
+                    relationship_ids=relationship_ids,
+                )
+            ]
+            community_records = list(session.run(
+                "MATCH (community:Community {namespace: $namespace})-[:HAS_MEMBER]->"
+                "(member:Entity {namespace: $namespace}) "
+                "WHERE member.row_id IN $seed_ids "
+                "WITH DISTINCT community "
+                "OPTIONAL MATCH (report:CommunityReport {namespace: $namespace})-[:REPORTS_ON]->(community) "
+                "RETURN community.data AS community_data, report.data AS report_data",
+                namespace=self._namespace,
+                seed_ids=seed_entity_ids,
+            ))
+            community_rows = [
+                record["community_data"] for record in community_records if record["community_data"]
+            ]
+            report_rows = [
+                record["report_data"] for record in community_records if record["report_data"]
+            ]
+
+        def to_dataframe(rows: list[str]) -> pd.DataFrame:
+            return pd.DataFrame([json.loads(row) for row in dict.fromkeys(rows)])
+
+        return {
+            "entities": to_dataframe(entity_rows),
+            "relationships": to_dataframe(relationship_rows),
+            "text_units": to_dataframe(text_unit_rows),
+            "communities": to_dataframe(community_rows),
+            "community_reports": to_dataframe(report_rows),
+        }
+
     async def has(self, table_name: str) -> bool:
         """Check whether the logical table was created."""
         await self._ensure_schema()
@@ -342,7 +432,8 @@ class Neo4jTableProvider(TableProvider):
         await self._run_links(
             "UNWIND $links AS link "
             "MATCH (report:CommunityReport {namespace: $namespace, row_id: link.source}) "
-            "MATCH (community:Community {namespace: $namespace, row_id: link.target}) "
+            "MATCH (community:Community {namespace: $namespace}) "
+            "WHERE toString(community.community) = link.target "
             "MERGE (report)-[:REPORTS_ON]->(community)",
             links,
         )
