@@ -68,6 +68,12 @@ def create_table_provider(
                 )
 
                 register_table_provider(TableType.CSV, CSVTableProvider)
+            case TableType.Neo4j:
+                from graphrag_storage.tables.neo4j_table_provider import (
+                    Neo4jTableProvider,
+                )
+
+                register_table_provider(TableType.Neo4j, Neo4jTableProvider)
             case TableType.CosmosDB:
                 from graphrag_storage.tables.cosmos_table_provider import (
                     CosmosTableProvider,

@@ -15,7 +15,7 @@ class TableProviderConfig(BaseModel):
     """允许额外字段，以支持自定义表提供者实现。"""
 
     type: str = Field(
-        description="要使用的表类型。内置类型包括 'parquet'、'csv' 和 'cosmosdb'。",
+        description="要使用的表类型。内置类型包括 'parquet'、'csv'、'cosmosdb' 和 'neo4j'。",
         default=TableType.Parquet,
     )
 

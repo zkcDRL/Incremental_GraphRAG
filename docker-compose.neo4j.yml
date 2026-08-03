@@ -6,8 +6,8 @@ services:
     env_file:
       - .env.neo4j
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:17474:7474"
+      - "127.0.0.1:17687:7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs

@@ -70,3 +70,5 @@ packages/graphrag-*/example_notebooks/**/output
 packages/graphrag-*/example_notebooks/**/cache
 
 命令.txt
+
+graphrag-test/
