@@ -71,6 +71,9 @@ class TableProvider(ABC):
                 表名列表，不包含文件扩展名。
         """
 
+    async def clear(self) -> None:
+        pass
+
     @abstractmethod
     def open(
         self,

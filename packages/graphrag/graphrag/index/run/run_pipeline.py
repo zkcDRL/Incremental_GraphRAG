@@ -5,6 +5,7 @@
 
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterable
 from dataclasses import asdict
@@ -12,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 from graphrag_cache import create_cache
-from graphrag_storage import create_storage
+from graphrag_storage import Storage, create_storage
 from graphrag_storage.tables.table_provider import TableProvider
 from graphrag_storage.tables.table_provider_factory import create_table_provider
 
@@ -106,12 +107,21 @@ async def run_pipeline(
             state=state,
         )
 
+    pipeline_failed = False
     async for table in _run_pipeline(
         pipeline=pipeline,
         config=config,
         context=context,
     ):
+        pipeline_failed = pipeline_failed or table.error is not None
         yield table
+
+    if is_update_run and not pipeline_failed:
+        await _cleanup_update_snapshots(
+            update_storage,
+            update_base_provider,
+            config.update.snapshot_retention_count,
+        )
 
 
 async def _run_pipeline(
@@ -183,7 +193,28 @@ async def _copy_previous_output(
     output_table_provider: TableProvider,
     previous_table_provider: TableProvider,
 ) -> None:
-    """Copy all parquet tables from output to previous storage for backup."""
+    """Copy final output as the old-index baseline for this incremental merge."""
     for table_name in output_table_provider.list():
         table = await output_table_provider.read_dataframe(table_name)
         await previous_table_provider.write_dataframe(table_name, table)
+
+
+async def _cleanup_update_snapshots(
+    update_storage: Storage,
+    update_table_provider: TableProvider,
+    retention_count: int,
+) -> None:
+    """Remove update snapshots and table namespaces beyond retention."""
+    timestamps = sorted(
+        {
+            key.split("/", maxsplit=1)[0]
+            for key in update_storage.find(re.compile(r"."))
+            if re.fullmatch(r"\d{8}-\d{6}", key.split("/", maxsplit=1)[0])
+        }
+    )
+    expired_timestamps = timestamps[:-retention_count]
+
+    for timestamp in expired_timestamps:
+        await update_storage.child(timestamp).clear()
+        await update_table_provider.child(timestamp).clear()
+        logger.info("Removed expired incremental index snapshot: %s", timestamp)

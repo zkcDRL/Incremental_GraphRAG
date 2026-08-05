@@ -323,6 +323,13 @@ class SummarizeDescriptionsDefaults:
 
 
 @dataclass
+class UpdateDefaults:
+    """Default values for incremental indexing."""
+
+    snapshot_retention_count: int = 7
+
+
+@dataclass
 class UpdateOutputStorageDefaults(StorageDefaults):
     """Default values for update index output."""
 
@@ -352,6 +359,7 @@ class GraphRagConfigDefaults:
     update_output_storage: UpdateOutputStorageDefaults = field(
         default_factory=UpdateOutputStorageDefaults
     )
+    update: UpdateDefaults = field(default_factory=UpdateDefaults)
     cache: CacheDefaults = field(default_factory=CacheDefaults)
     input: InputDefaults = field(default_factory=InputDefaults)
 

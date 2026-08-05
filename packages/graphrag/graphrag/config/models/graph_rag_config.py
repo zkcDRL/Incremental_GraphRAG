@@ -35,6 +35,7 @@ from graphrag.config.models.snapshots_config import SnapshotsConfig
 from graphrag.config.models.summarize_descriptions_config import (
     SummarizeDescriptionsConfig,
 )
+from graphrag.config.models.update_config import UpdateConfig
 
 
 class GraphRagConfig(BaseModel):
@@ -128,6 +129,11 @@ class GraphRagConfig(BaseModel):
         ),
     )
     """The output configuration for the updated index."""
+
+    update: UpdateConfig = Field(
+        description="The incremental indexing configuration.", default=UpdateConfig()
+    )
+    """The incremental indexing configuration."""
 
     def _validate_update_output_storage_base_dir(self) -> None:
         """Validate the update output base directory."""

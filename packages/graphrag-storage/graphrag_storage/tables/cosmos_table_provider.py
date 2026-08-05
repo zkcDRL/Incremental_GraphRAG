@@ -265,6 +265,19 @@ class CosmosTableProvider(TableProvider):
             names.append(item)  # noqa: PERF401
         return names
 
+    async def clear(self) -> None:
+        container = await self._ensure_container()
+        query = "SELECT c.id FROM c"
+        item_ids = [
+            doc["id"]
+            async for doc in container.query_items(
+                query=query,
+                partition_key=self._namespace,
+            )
+        ]
+        if item_ids:
+            await _batch_delete(container, item_ids, self._namespace, self._batch_size)
+
     def open(
         self,
         table_name: str,

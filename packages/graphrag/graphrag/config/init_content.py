@@ -71,6 +71,9 @@ vector_store:
   type: {vector_store_defaults.type}
   db_uri: {vector_store_defaults.db_uri}
 
+update:
+  snapshot_retention_count: 7
+
 ### Workflow settings ###
 
 embed_text:

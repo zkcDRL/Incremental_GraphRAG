@@ -26,6 +26,16 @@ def test_default_config() -> None:
     assert_graphrag_configs(actual, expected)
 
 
+def test_update_snapshot_retention_config() -> None:
+    config = GraphRagConfig(
+        completion_models=DEFAULT_COMPLETION_MODELS,  # type: ignore
+        embedding_models=DEFAULT_EMBEDDING_MODELS,  # type: ignore
+        update={"snapshot_retention_count": 3},
+    )
+
+    assert config.update.snapshot_retention_count == 3
+
+
 @mock.patch.dict(os.environ, {"CUSTOM_API_KEY": FAKE_API_KEY}, clear=True)
 def test_load_minimal_config() -> None:
     cwd = Path.cwd()

@@ -290,6 +290,14 @@ class Neo4jTableProvider(TableProvider):
             )
             return [record["name"] for record in result]
 
+    async def clear(self) -> None:
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                "MATCH (node {namespace: $namespace}) DETACH DELETE node",
+                namespace=self._namespace,
+            )
+
     def open(
         self,
         table_name: str,

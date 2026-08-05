@@ -135,6 +135,14 @@ The section defines a secondary storage location for running incremental indexin
 - `account_url` **str** - (blob only) The storage account blob URL to use.
 - `database_name` **str** - (cosmosdb only) The database name to use.
 
+### update
+
+控制 `graphrag update` 产生的历史快照保留策略。完成一轮成功的更新后，系统会删除超出保留数量的最旧快照。清理覆盖 `update_output_storage` 中的运行产物，以及表后端对应的 `previous` 和 `delta` 数据。
+
+#### Fields
+
+- `snapshot_retention_count` **int** - 保留的最近 update 快照轮数。必须至少为 `1`，默认 `7`。
+
 ### cache
 
 This section controls the cache mechanism used by the pipeline. This is used to cache LLM invocation results for faster performance when re-running the indexing process.
