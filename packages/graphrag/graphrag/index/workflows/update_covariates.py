@@ -25,7 +25,11 @@ async def run_workflow(
     """Update the covariates from a incremental index run."""
     logger.info("Workflow started: update_covariates")
     output_table_provider, previous_table_provider, delta_table_provider = (
-        get_update_table_providers(config, context.state["update_timestamp"])
+        get_update_table_providers(
+            config,
+            context.state["update_timestamp"],
+            context.final_output_table_provider,
+        )
     )
 
     if await previous_table_provider.has(

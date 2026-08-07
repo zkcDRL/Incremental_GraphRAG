@@ -88,6 +88,7 @@ class Neo4jTableProvider(TableProvider):
         password: str | None = None,
         database: str = "neo4j",
         namespace: str = "",
+        vector_version: str | None = None,
         _driver: AsyncDriver | None = None,
         _list_driver: Driver | None = None,
         **_: Any,
@@ -101,6 +102,7 @@ class Neo4jTableProvider(TableProvider):
         )
         self._database = database
         self._namespace = namespace
+        self._vector_version = vector_version
         self._owns_driver = _driver is None
         self._owns_list_driver = _list_driver is None
         self._initialized = False
@@ -120,6 +122,153 @@ class Neo4jTableProvider(TableProvider):
                 "REQUIRE (table.namespace, table.name) IS UNIQUE"
             )
         self._initialized = True
+
+    async def create_building_version(self, version: str) -> Neo4jTableProvider:
+        """创建仅供构建流程写入的版本命名空间."""
+        await self._ensure_schema()
+        storage_namespace = self._version_namespace(version)
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                "MERGE (version:GraphRAGVersion {logical_namespace: $namespace, version: $version}) "
+                "ON CREATE SET version.storage_namespace = $storage_namespace, "
+                "version.state = 'building' "
+                "WITH version "
+                "WHERE version.state = 'building' "
+                "RETURN version.storage_namespace AS storage_namespace",
+                namespace=self._namespace,
+                version=version,
+                storage_namespace=storage_namespace,
+            )
+        return self._with_namespace(storage_namespace, vector_version=version)
+
+    async def get_active_version(self) -> str | None:
+        """返回逻辑命名空间当前已发布版本的物理命名空间."""
+        await self._ensure_schema()
+        await self._ensure_legacy_version()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (namespace:GraphRAGNamespace {name: $namespace}) "
+                "MATCH (version:GraphRAGVersion {logical_namespace: $namespace, "
+                "version: namespace.active_version, state: 'active'}) "
+                "RETURN version.storage_namespace AS storage_namespace",
+                namespace=self._namespace,
+            )
+            record = await result.single()
+        return record["storage_namespace"] if record else None
+
+    async def _ensure_legacy_version(self) -> None:
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                "OPTIONAL MATCH (table:GraphRAGTable {namespace: $namespace}) "
+                "WITH count(table) > 0 AS has_legacy_data "
+                "WHERE has_legacy_data "
+                "MERGE (version:GraphRAGVersion {logical_namespace: $namespace, "
+                "version: 'legacy'}) "
+                "ON CREATE SET version.storage_namespace = $namespace, "
+                "version.state = 'active' "
+                "WITH version "
+                "MERGE (meta:GraphRAGNamespace {name: $namespace}) "
+                "ON CREATE SET meta.active_version = 'legacy'",
+                namespace=self._namespace,
+            )
+
+    async def get_active_provider(self) -> Neo4jTableProvider:
+        """返回绑定当前已发布版本的只读提供者."""
+        active_namespace = await self.get_active_version()
+        if active_namespace is None or active_namespace == self._namespace:
+            return self
+        version = active_namespace.rsplit("/", maxsplit=1)[-1]
+        return self._with_namespace(active_namespace, vector_version=version)
+
+    async def publish_version(self, version: str) -> None:
+        """在单一事务内发布完成构建的版本."""
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            await session.execute_write(
+                self._publish_version_transaction,
+                self._namespace,
+                version,
+            )
+
+    async def mark_version_failed(self, version: str) -> None:
+        """标记未发布的构建版本失败."""
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                "MATCH (version:GraphRAGVersion {logical_namespace: $namespace, version: $version}) "
+                "WHERE version.state = 'building' SET version.state = 'failed'",
+                namespace=self._namespace,
+                version=version,
+            )
+
+    @staticmethod
+    async def _publish_version_transaction(tx, namespace: str, version: str) -> None:
+        result = await tx.run(
+            "MERGE (meta:GraphRAGNamespace {name: $namespace}) "
+            "WITH meta "
+            "MATCH (candidate:GraphRAGVersion {logical_namespace: $namespace, "
+            "version: $version, state: 'building'}) "
+            "OPTIONAL MATCH (previous:GraphRAGVersion {logical_namespace: $namespace, state: 'active'}) "
+            "WHERE previous IS NULL OR previous.version <> candidate.version "
+            "SET candidate.state = 'active', meta.active_version = candidate.version, "
+            "previous.state = CASE WHEN previous IS NULL THEN NULL ELSE 'superseded' END",
+            namespace=namespace,
+            version=version,
+        )
+        await result.consume()
+
+    def _version_namespace(self, version: str) -> str:
+        prefix = f"{self._namespace}/" if self._namespace else ""
+        return f"{prefix}__graphrag_versions__/{version}"
+
+    async def clear_versions(self, versions: list[str]) -> None:
+        """删除非活跃版本的物理数据与版本元数据."""
+        if not versions:
+            return
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            await session.execute_write(
+                self._clear_versions_transaction,
+                self._namespace,
+                versions,
+            )
+
+    @staticmethod
+    async def _clear_versions_transaction(tx, namespace: str, versions: list[str]) -> None:
+        result = await tx.run(
+            "MATCH (version:GraphRAGVersion {logical_namespace: $namespace}) "
+            "WHERE version.version IN $versions AND version.state <> 'active' "
+            "WITH collect(version.storage_namespace) AS storage_namespaces "
+            "MATCH (node) WHERE node.namespace IN storage_namespaces "
+            "DETACH DELETE node",
+            namespace=namespace,
+            versions=versions,
+        )
+        await result.consume()
+        result = await tx.run(
+            "MATCH (version:GraphRAGVersion {logical_namespace: $namespace}) "
+            "WHERE version.version IN $versions AND version.state <> 'active' "
+            "DELETE version",
+            namespace=namespace,
+            versions=versions,
+        )
+        await result.consume()
+
+    @property
+    def vector_version(self) -> str | None:
+        """返回与当前物理命名空间一致的向量索引版本."""
+        return self._vector_version
+
+    def _with_namespace(
+        self, namespace: str, vector_version: str | None = None
+    ) -> Neo4jTableProvider:
+        return Neo4jTableProvider(
+            database=self._database,
+            namespace=namespace,
+            vector_version=vector_version,
+            _driver=self._driver,
+            _list_driver=self._list_driver,
+        )
 
     async def read_dataframe(self, table_name: str) -> pd.DataFrame:
         """Read a table back into its original DataFrame shape."""
@@ -291,6 +440,7 @@ class Neo4jTableProvider(TableProvider):
             return [record["name"] for record in result]
 
     async def clear(self) -> None:
+        """删除当前命名空间的全部节点."""
         await self._ensure_schema()
         async with self._driver.session(database=self._database) as session:
             await session.run(
@@ -312,12 +462,7 @@ class Neo4jTableProvider(TableProvider):
         if name is None:
             return self
         namespace = f"{self._namespace}/{name}" if self._namespace else name
-        return Neo4jTableProvider(
-            database=self._database,
-            namespace=namespace,
-            _driver=self._driver,
-            _list_driver=self._list_driver,
-        )
+        return self._with_namespace(namespace, vector_version=self._vector_version)
 
     async def close(self) -> None:
         """Close drivers owned by this provider."""
@@ -442,6 +587,7 @@ class Neo4jTableProvider(TableProvider):
             "MATCH (report:CommunityReport {namespace: $namespace, row_id: link.source}) "
             "MATCH (community:Community {namespace: $namespace}) "
             "WHERE toString(community.community) = link.target "
+            "OR community.row_id = link.target "
             "MERGE (report)-[:REPORTS_ON]->(community)",
             links,
         )

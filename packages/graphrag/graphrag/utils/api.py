@@ -15,9 +15,14 @@ from graphrag_vectors import (
 def get_embedding_store(
     config: VectorStoreConfig,
     embedding_name: str,
+    version: str | None = None,
 ) -> VectorStore:
     """Get the embedding store."""
-    embedding_store = create_vector_store(config, config.index_schema[embedding_name])
+    embedding_store = create_vector_store(
+        config,
+        config.index_schema[embedding_name],
+        version=version,
+    )
     embedding_store.connect()
 
     return embedding_store

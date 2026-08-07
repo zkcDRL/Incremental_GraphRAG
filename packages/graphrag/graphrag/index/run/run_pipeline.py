@@ -14,8 +14,10 @@ from typing import Any
 import pandas as pd
 from graphrag_cache import create_cache
 from graphrag_storage import Storage, create_storage
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.table_provider import TableProvider
 from graphrag_storage.tables.table_provider_factory import create_table_provider
+from graphrag_vectors import delete_versioned_vector_indexes
 
 from graphrag.callbacks.workflow_callbacks import WorkflowCallbacks
 from graphrag.config.models.graph_rag_config import GraphRagConfig
@@ -42,6 +44,9 @@ async def run_pipeline(
     output_storage = create_storage(config.output_storage)
 
     output_table_provider = create_table_provider(config.table_provider, output_storage)
+    active_table_provider = output_table_provider
+    if isinstance(output_table_provider, Neo4jTableProvider):
+        active_table_provider = await output_table_provider.get_active_provider()
 
     cache = create_cache(config.cache)
 
@@ -52,12 +57,20 @@ async def run_pipeline(
     if additional_context:
         state.setdefault("additional_context", {}).update(additional_context)
 
+    version_provider: Neo4jTableProvider | None = None
     if is_update_run:
         logger.info("Running incremental indexing.")
 
         update_storage = create_storage(config.update_output_storage)
         # we use this to store the new subset index, and will merge its content with the previous index
         update_timestamp = time.strftime("%Y%m%d-%H%M%S")
+
+        if isinstance(output_table_provider, Neo4jTableProvider):
+            version_provider = output_table_provider
+            output_table_provider = await version_provider.create_building_version(
+                update_timestamp
+            )
+
         timestamped_storage = update_storage.child(update_timestamp)
         delta_storage = timestamped_storage.child("delta")
         # Build table providers via child() so Cosmos providers use namespace
@@ -71,7 +84,7 @@ async def run_pipeline(
         # we'll read from this later when we merge the old and new indexes
         previous_table_provider = update_table_provider.child("previous")
 
-        await _copy_previous_output(output_table_provider, previous_table_provider)
+        await _copy_previous_output(active_table_provider, previous_table_provider)
 
         state["update_timestamp"] = update_timestamp
 
@@ -88,6 +101,7 @@ async def run_pipeline(
             cache=cache,
             callbacks=callbacks,
             state=state,
+            final_output_table_provider=output_table_provider,
         )
 
     else:
@@ -117,11 +131,17 @@ async def run_pipeline(
         yield table
 
     if is_update_run and not pipeline_failed:
+        if version_provider:
+            await version_provider.publish_version(update_timestamp)
         await _cleanup_update_snapshots(
             update_storage,
             update_base_provider,
             config.update.snapshot_retention_count,
+            config,
+            version_provider,
         )
+    elif is_update_run and version_provider:
+        await version_provider.mark_version_failed(update_timestamp)
 
 
 async def _run_pipeline(
@@ -203,6 +223,8 @@ async def _cleanup_update_snapshots(
     update_storage: Storage,
     update_table_provider: TableProvider,
     retention_count: int,
+    config: GraphRagConfig | None = None,
+    version_provider: Neo4jTableProvider | None = None,
 ) -> None:
     """Remove update snapshots and table namespaces beyond retention."""
     timestamps = sorted(
@@ -213,6 +235,12 @@ async def _cleanup_update_snapshots(
         }
     )
     expired_timestamps = timestamps[:-retention_count]
+
+    if version_provider:
+        await version_provider.clear_versions(expired_timestamps)
+        if config:
+            for timestamp in expired_timestamps:
+                delete_versioned_vector_indexes(config.vector_store, timestamp)
 
     for timestamp in expired_timestamps:
         await update_storage.child(timestamp).clear()

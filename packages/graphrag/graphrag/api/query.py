@@ -202,6 +202,7 @@ async def local_search(
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
     graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
+    vector_store_version: str | None = None,
     verbose: bool = False,
 ) -> tuple[
     str | dict[str, Any] | list[dict[str, Any]],
@@ -252,6 +253,7 @@ async def local_search(
         query=query,
         callbacks=callbacks,
         graph_context_loader=graph_context_loader,
+        vector_store_version=vector_store_version,
     ):
         full_response += chunk
     logger.debug("Query response: %s", truncate(full_response, 400))
@@ -272,6 +274,7 @@ def local_search_streaming(
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
     graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
+    vector_store_version: str | None = None,
     verbose: bool = False,
 ) -> AsyncGenerator:
     """Perform a local search and return the context data and response via a generator.
@@ -300,6 +303,7 @@ def local_search_streaming(
     description_embedding_store = get_embedding_store(
         config=config.vector_store,
         embedding_name=entity_description_embedding,
+        version=vector_store_version,
     )
 
     if graph_context_loader is None:
@@ -350,6 +354,7 @@ async def drift_search(
     response_type: str,
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
+    vector_store_version: str | None = None,
     verbose: bool = False,
 ) -> tuple[
     str | dict[str, Any] | list[dict[str, Any]],
@@ -397,6 +402,7 @@ async def drift_search(
         response_type=response_type,
         query=query,
         callbacks=callbacks,
+        vector_store_version=vector_store_version,
     ):
         full_response += chunk
     logger.debug("Query response: %s", truncate(full_response, 400))
@@ -415,6 +421,7 @@ def drift_search_streaming(
     response_type: str,
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
+    vector_store_version: str | None = None,
     verbose: bool = False,
 ) -> AsyncGenerator:
     """Perform a DRIFT search and return the context data and response.
@@ -441,11 +448,13 @@ def drift_search_streaming(
     description_embedding_store = get_embedding_store(
         config=config.vector_store,
         embedding_name=entity_description_embedding,
+        version=vector_store_version,
     )
 
     full_content_embedding_store = get_embedding_store(
         config=config.vector_store,
         embedding_name=community_full_content_embedding,
+        version=vector_store_version,
     )
 
     entities_ = read_indexer_entities(entities, communities, community_level)
@@ -477,6 +486,7 @@ async def basic_search(
     response_type: str,
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
+    vector_store_version: str | None = None,
     verbose: bool = False,
 ) -> tuple[
     str | dict[str, Any] | list[dict[str, Any]],
@@ -515,6 +525,7 @@ async def basic_search(
         response_type=response_type,
         query=query,
         callbacks=callbacks,
+        vector_store_version=vector_store_version,
     ):
         full_response += chunk
     logger.debug("Query response: %s", truncate(full_response, 400))
@@ -528,6 +539,7 @@ def basic_search_streaming(
     response_type: str,
     query: str,
     callbacks: list[QueryCallbacks] | None = None,
+    vector_store_version: str | None = None,
     verbose: bool = False,
 ) -> AsyncGenerator:
     """Perform a local search and return the context data and response via a generator.
@@ -550,6 +562,7 @@ def basic_search_streaming(
     embedding_store = get_embedding_store(
         config=config.vector_store,
         embedding_name=text_unit_text_embedding,
+        version=vector_store_version,
     )
 
     prompt = load_search_prompt(config.basic_search.prompt)

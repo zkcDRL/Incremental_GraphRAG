@@ -24,6 +24,7 @@ from graphrag_vectors.vector_store_config import VectorStoreConfig
 from graphrag_vectors.vector_store_factory import (
     VectorStoreFactory,
     create_vector_store,
+    delete_versioned_vector_indexes,
     register_vector_store,
     vector_store_factory,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "VectorStoreSearchResult",
     "VectorStoreType",
     "create_vector_store",
+    "delete_versioned_vector_indexes",
     "explode_timestamp",
     "register_vector_store",
     "vector_store_factory",

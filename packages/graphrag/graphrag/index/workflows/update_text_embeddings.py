@@ -27,7 +27,9 @@ async def run_workflow(
     logger.info("Workflow started: update_text_embeddings")
 
     output_table_provider, _, _ = get_update_table_providers(
-        config, context.state["update_timestamp"]
+        config,
+        context.state["update_timestamp"],
+        context.final_output_table_provider,
     )
 
     model_config = config.get_embedding_model_config(

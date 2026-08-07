@@ -21,7 +21,11 @@ async def run_workflow(
     """Update the documents from a incremental index run."""
     logger.info("Workflow started: update_final_documents")
     output_table_provider, previous_table_provider, delta_table_provider = (
-        get_update_table_providers(config, context.state["update_timestamp"])
+        get_update_table_providers(
+            config,
+            context.state["update_timestamp"],
+            context.final_output_table_provider,
+        )
     )
 
     final_documents = await concat_dataframes(

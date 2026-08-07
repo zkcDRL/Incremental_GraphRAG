@@ -32,3 +32,5 @@ class PipelineRunContext:
     "Callbacks to be called during the pipeline run."
     state: PipelineState
     "Arbitrary property bag for runtime state, persistent pre-computes, or experimental features."
+    final_output_table_provider: TableProvider | None = None
+    "最终索引输出提供者, 仅在增量运行中与增量中间输出分离."

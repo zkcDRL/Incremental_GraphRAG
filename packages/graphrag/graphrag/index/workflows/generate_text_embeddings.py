@@ -124,6 +124,7 @@ async def generate_text_embeddings(
         vector_store = create_vector_store(
             config.vector_store,
             config.vector_store.index_schema[field_config.name],
+            version=getattr(table_provider, "vector_version", None),
         )
         vector_store.connect()
 

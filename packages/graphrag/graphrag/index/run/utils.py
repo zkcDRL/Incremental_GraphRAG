@@ -29,6 +29,7 @@ def create_run_context(
     callbacks: WorkflowCallbacks | None = None,
     stats: PipelineRunStats | None = None,
     state: PipelineState | None = None,
+    final_output_table_provider: TableProvider | None = None,
 ) -> PipelineRunContext:
     """Create the run context for the pipeline."""
     input_storage = input_storage or MemoryStorage()
@@ -43,6 +44,7 @@ def create_run_context(
         callbacks=callbacks or NoopWorkflowCallbacks(),
         stats=stats or PipelineRunStats(),
         state=state or {},
+        final_output_table_provider=final_output_table_provider,
     )
 
 
@@ -57,11 +59,15 @@ def create_callback_chain(
 
 
 def get_update_table_providers(
-    config: GraphRagConfig, timestamp: str
+    config: GraphRagConfig,
+    timestamp: str,
+    output_table_provider: TableProvider | None = None,
 ) -> tuple[TableProvider, TableProvider, TableProvider]:
     """Get table providers for the update index run."""
     output_storage = create_storage(config.output_storage)
-    output_table_provider = create_table_provider(config.table_provider, output_storage)
+    output_table_provider = output_table_provider or create_table_provider(
+        config.table_provider, output_storage
+    )
 
     # Build update providers via table_provider.child() so that Cosmos
     # providers use namespace isolation while file/blob providers delegate

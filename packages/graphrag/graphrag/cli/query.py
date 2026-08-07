@@ -10,6 +10,8 @@ from typing import Any
 
 import pandas as pd
 from graphrag_storage import create_storage
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
+from graphrag_storage.tables.table_provider import TableProvider
 from graphrag_storage.tables.table_provider_factory import create_table_provider
 
 import graphrag.api as api
@@ -43,6 +45,7 @@ def run_global_search(
         cli_overrides=cli_overrides,
     )
 
+    table_provider = _get_query_table_provider(config)
     dataframe_dict = _resolve_output_files(
         config=config,
         output_list=[
@@ -51,6 +54,7 @@ def run_global_search(
             "community_reports",
         ],
         optional_list=[],
+        table_provider=table_provider,
     )
 
     entities: pd.DataFrame = dataframe_dict["entities"]
@@ -128,15 +132,17 @@ def run_local_search(
         root_dir=root_dir,
         cli_overrides=cli_overrides,
     )
+    table_provider = _get_query_table_provider(config)
+    vector_store_version = getattr(table_provider, "vector_version", None)
     graph_context_loader = None
-    if config.table_provider.type == "neo4j":
-        table_provider = create_table_provider(config.table_provider)
+    if isinstance(table_provider, Neo4jTableProvider):
         graph_context_loader = table_provider.read_local_search_context
 
     if config.table_provider.type == "neo4j":
         dataframe_dict = _resolve_output_files(
             config=config,
             output_list=["entities"],
+            table_provider=table_provider,
         )
         dataframe_dict.update(
             {
@@ -195,6 +201,7 @@ def run_local_search(
                 query=query,
                 callbacks=[callbacks],
                 graph_context_loader=graph_context_loader,
+                vector_store_version=vector_store_version,
                 verbose=verbose,
             ):
                 full_response += stream_chunk
@@ -218,6 +225,7 @@ def run_local_search(
             response_type=response_type,
             query=query,
             graph_context_loader=graph_context_loader,
+            vector_store_version=vector_store_version,
             verbose=verbose,
         )
     )
@@ -247,6 +255,8 @@ def run_drift_search(
         cli_overrides=cli_overrides,
     )
 
+    table_provider = _get_query_table_provider(config)
+    vector_store_version = getattr(table_provider, "vector_version", None)
     dataframe_dict = _resolve_output_files(
         config=config,
         output_list=[
@@ -256,6 +266,7 @@ def run_drift_search(
             "relationships",
             "entities",
         ],
+        table_provider=table_provider,
     )
 
     communities: pd.DataFrame = dataframe_dict["communities"]
@@ -288,6 +299,7 @@ def run_drift_search(
                 response_type=response_type,
                 query=query,
                 callbacks=[callbacks],
+                vector_store_version=vector_store_version,
                 verbose=verbose,
             ):
                 full_response += stream_chunk
@@ -310,6 +322,7 @@ def run_drift_search(
             community_level=community_level,
             response_type=response_type,
             query=query,
+            vector_store_version=vector_store_version,
             verbose=verbose,
         )
     )
@@ -338,11 +351,14 @@ def run_basic_search(
         cli_overrides=cli_overrides,
     )
 
+    table_provider = _get_query_table_provider(config)
+    vector_store_version = getattr(table_provider, "vector_version", None)
     dataframe_dict = _resolve_output_files(
         config=config,
         output_list=[
             "text_units",
         ],
+        table_provider=table_provider,
     )
 
     text_units: pd.DataFrame = dataframe_dict["text_units"]
@@ -366,6 +382,7 @@ def run_basic_search(
                 response_type=response_type,
                 query=query,
                 callbacks=[callbacks],
+                vector_store_version=vector_store_version,
                 verbose=verbose,
             ):
                 full_response += stream_chunk
@@ -382,6 +399,7 @@ def run_basic_search(
             text_units=text_units,
             response_type=response_type,
             query=query,
+            vector_store_version=vector_store_version,
             verbose=verbose,
         )
     )
@@ -390,15 +408,31 @@ def run_basic_search(
     return response, context_data
 
 
+def _get_query_table_provider(config: GraphRagConfig) -> TableProvider | None:
+    if config.table_provider.type != "neo4j":
+        return None
+    provider = create_table_provider(config.table_provider)
+    if isinstance(provider, Neo4jTableProvider):
+        return asyncio.run(provider.get_active_provider())
+    return provider
+
+
 def _resolve_output_files(
     config: GraphRagConfig,
     output_list: list[str],
     optional_list: list[str] | None = None,
+    table_provider: TableProvider | None = None,
 ) -> dict[str, Any]:
     """Read indexing output files to a dataframe dict, with correct column types."""
     dataframe_dict = {}
-    storage_obj = create_storage(config.output_storage)
-    table_provider = create_table_provider(config.table_provider, storage=storage_obj)
+    if table_provider is None:
+        storage_obj = create_storage(config.output_storage)
+        table_provider = create_table_provider(config.table_provider, storage=storage_obj)
+    if (
+        isinstance(table_provider, Neo4jTableProvider)
+        and table_provider.vector_version is None
+    ):
+        table_provider = asyncio.run(table_provider.get_active_provider())
     reader = DataReader(table_provider)
     for name in output_list:
         df_value = asyncio.run(getattr(reader, name)())

@@ -51,8 +51,26 @@ def register_vector_store(
     vector_store_factory.register(vector_store_type, vector_store_initializer, scope)
 
 
+def delete_versioned_vector_indexes(
+    config: VectorStoreConfig, version: str
+) -> None:
+    """删除指定版本的 LanceDB 向量表."""
+    if config.type != VectorStoreType.LanceDB or config.db_uri is None:
+        return
+
+    import lancedb
+
+    connection = lancedb.connect(config.db_uri)
+    for schema in config.index_schema.values():
+        index_name = f"{schema.index_name}__graphrag_{version}"
+        if index_name in connection.table_names():
+            connection.drop_table(index_name)
+
+
 def create_vector_store(
-    config: VectorStoreConfig, index_schema: IndexSchema
+    config: VectorStoreConfig,
+    index_schema: IndexSchema,
+    version: str | None = None,
 ) -> VectorStore:
     """Create a vector store implementation based on the given type and configuration.
 
@@ -94,6 +112,8 @@ def create_vector_store(
     # collapse the base config and specific index config into a single dict for the initializer
     config_model = config.model_dump()
     index_model = index_schema.model_dump()
+    if version is not None and strategy == VectorStoreType.LanceDB:
+        index_model["index_name"] = f"{index_model['index_name']}__graphrag_{version}"
     return vector_store_factory.create(
         strategy, init_args={**config_model, **index_model}
     )
