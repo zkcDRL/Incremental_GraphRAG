@@ -73,6 +73,10 @@ vector_store:
 
 update:
   snapshot_retention_count: 7
+  local_edge_ratio: 0.01
+  local_community_ratio: 0.05
+  cold_start_edge_ratio: 0.10
+  community_hops: 1
 
 ### Workflow settings ###
 

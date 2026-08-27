@@ -22,6 +22,7 @@ def cluster_graph(
     max_cluster_size: int,
     use_lcc: bool,
     seed: int | None = None,
+    starting_communities: dict[str, int] | None = None,
 ) -> Communities:
     """Apply a hierarchical clustering algorithm to a relationships DataFrame."""
     node_id_to_community_map, parent_mapping = _compute_leiden_communities(
@@ -29,6 +30,7 @@ def cluster_graph(
         max_cluster_size=max_cluster_size,
         use_lcc=use_lcc,
         seed=seed,
+        starting_communities=starting_communities,
     )
 
     levels = sorted(node_id_to_community_map.keys())
@@ -53,6 +55,7 @@ def _compute_leiden_communities(
     max_cluster_size: int,
     use_lcc: bool,
     seed: int | None = None,
+    starting_communities: dict[str, int] | None = None,
 ) -> tuple[dict[int, dict[str, int]], dict[int, int]]:
     """Return Leiden root communities and their hierarchy mapping."""
     edge_df = edges.copy()
@@ -82,9 +85,19 @@ def _compute_leiden_communities(
             strict=True,
         )
     )
+    if starting_communities is not None:
+        edge_nodes = {node for source, target, _ in edge_list for node in (source, target)}
+        starting_communities = {
+            str(node): community
+            for node, community in starting_communities.items()
+            if str(node) in edge_nodes
+        }
 
     community_mapping = hierarchical_leiden(
-        edge_list, max_cluster_size=max_cluster_size, random_seed=seed
+        edge_list,
+        max_cluster_size=max_cluster_size,
+        random_seed=seed,
+        starting_communities=starting_communities,
     )
     results: dict[int, dict[str, int]] = {}
     hierarchy: dict[int, int] = {}

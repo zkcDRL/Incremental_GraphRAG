@@ -12,13 +12,14 @@ def hierarchical_leiden(
     edges: list[tuple[str, str, float]],
     max_cluster_size: int = 10,
     random_seed: int | None = 0xDEADBEEF,
+    starting_communities: dict[str, int] | None = None,
 ) -> list[gn.HierarchicalCluster]:
-    """Run hierarchical leiden on an edge list."""
+    """Run hierarchical Leiden on an edge list, optionally warm-started."""
     return gn.hierarchical_leiden(
         edges=edges,
         max_cluster_size=max_cluster_size,
         seed=random_seed,
-        starting_communities=None,
+        starting_communities=starting_communities,
         resolution=1.0,
         randomness=0.001,
         use_modularity=True,

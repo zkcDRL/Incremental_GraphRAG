@@ -178,6 +178,37 @@ class TestDeterminism:
 
         pd.testing.assert_frame_equal(edges, original)
 
+    def test_passes_starting_communities_to_leiden(self, monkeypatch):
+        """Warm-start mappings should reach the Leiden wrapper unchanged."""
+        captured = {}
+
+        class Partition:
+            def __init__(self, node: str, cluster: int):
+                self.node = node
+                self.cluster = cluster
+                self.level = 0
+                self.parent_cluster = None
+
+        def fake_leiden(edge_list, **kwargs):
+            captured.update(kwargs)
+            return [Partition("A", 7), Partition("B", 7)]
+
+        monkeypatch.setattr(
+            "graphrag.index.operations.cluster_graph.hierarchical_leiden",
+            fake_leiden,
+        )
+        starting = {"A": 7, "B": 7}
+        result = cluster_graph(
+            _make_edges([("A", "B", 1.0)]),
+            max_cluster_size=10,
+            use_lcc=False,
+            seed=42,
+            starting_communities=starting,
+        )
+
+        assert captured["starting_communities"] == starting
+        assert result[0][3] == ["A", "B"]
+
 
 # -------------------------------------------------------------------
 # Output structure

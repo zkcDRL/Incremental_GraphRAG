@@ -71,6 +71,22 @@ _fast_workflows = [
     "create_community_reports_text",
     "generate_text_embeddings",
 ]
+_standard_update_delta_workflows = [
+    "create_base_text_units",
+    "create_final_documents",
+    "extract_graph",
+    "finalize_graph",
+    "extract_covariates",
+    "create_final_text_units",
+]
+_fast_update_delta_workflows = [
+    "create_base_text_units",
+    "create_final_documents",
+    "extract_graph_nlp",
+    "prune_graph",
+    "finalize_graph",
+    "create_final_text_units",
+]
 _update_workflows = [
     "update_final_documents",
     "update_entities_relationships",
@@ -89,9 +105,9 @@ PipelineFactory.register_pipeline(
 )
 PipelineFactory.register_pipeline(
     IndexingMethod.StandardUpdate,
-    ["load_update_documents", *_standard_workflows, *_update_workflows],
+    ["load_update_documents", *_standard_update_delta_workflows, *_update_workflows],
 )
 PipelineFactory.register_pipeline(
     IndexingMethod.FastUpdate,
-    ["load_update_documents", *_fast_workflows, *_update_workflows],
+    ["load_update_documents", *_fast_update_delta_workflows, *_update_workflows],
 )
