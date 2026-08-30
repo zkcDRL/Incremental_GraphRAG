@@ -1,0 +1,304 @@
+﻿qid,question_type,support_status,evidence_chunk_ids,question,gold_answer,review_note
+FB-0001,FB,supported,textbook13-r0004-c002,"In Java, accessing an object’s methods requires the _____ operator.",dot,
+FB-0004,FB,supported,textbook13-r0049-c004,"When class A is using class B for something, the methods and fields class A can access in class B are called class B’s __________.",interface,
+FB-0005,FB,not_found,,A copy is ________ times as fast as a swap.,three,
+FB-0009,FB,supported,textbook13-r0117-c000,A __________ transforms a range of key values into a range of index values.,hash function,
+FB-0011,FB,supported,textbook13-r0119-c000,Separate chaining involves the use of a _____________ at each location.,linked list,
+FB-0018,FB,not_found,,Either variables of primitive types or _________ can be placed in an array.,objects,
+FB-0019,FB,supported,textbook13-r0030-c000,The two basic operations in simple sorting are _________ items and _________ them (or sometimes _________ them).,"comparing, swapping, copying",
+FB-0020,FB,supported,textbook13-r0028-c000,The invariant in the insertion sort is that ________.,Items with indices less than outer are partially sorted,
+FB-0023,FB,supported,textbook13-r0068-c001,"If an array has 100 elements, then Knuth’s algorithm would start with an interval of ________.",40,
+FB-0025,FB,supported,textbook13-r0071-c001,Quicksort involves partitioning the original array and then _________.,partitioning the resulting subarrays,
+FB-0026,FB,supported,textbook13-r0069-c006,Median-of-three partitioning is a way of choosing the _______ .,pivot,
+FB-0027,FB,partial,textbook13-r0071-c001,"In quicksort, for an array of N elements, the partitionIt() method will examine each element approximately ______ times.",log2(N),正文支持快速排序的 N log N 分析，但题目所要求的逐元素检查次数需要进一步推导。
+FB-0036,FB,not_found,,"A “crossover” node or subtree starts as a ________ and becomes a _______ , or vice versa.","left child, right child",
+FB-0037,FB,supported,textbook13-r0122-c000,"In external hashing, all records with keys that hash to the same value are located in ___________.",the same block,
+FB-0039,FB,supported,textbook17-r0179-c000,The eigenvalues of a matrix are found by solving the characteristic equation \det(A - \lambda I) = ________.,0,
+FB-0041,FB,supported,textbook17-r0165-c001,The trace of a matrix is the sum of its ________ elements.,diagonal,
+FB-0045,FB,supported,textbook16-r0002-c003,The variance of a random variable measures the ________ of its values.,dispersion,
+FB-0046,FB,supported,textbook15-r0227-c001,A binomial distribution models the number of ________ in a fixed number of independent Bernoulli trials.,successes,
+FB-0050,FB,not_found,,A function f(x) has a local maximum at x=a if f′(a)=0 and f''(a) < ________.,0,
+FB-0052,FB,partial,textbook17-r0208-c001,A convex function has a second derivative that is ________.,non-negative,段落给出二阶导数判别条件，但公式 OCR 不完整。
+FB-0055,FB,supported,textbook1-r0140-c000,The chromatic number of a graph is the minimum number of ________ needed to color the graph.,colors,
+FB-0057,FB,partial,textbook15-r0217-c002,A binary relation on a set is a collection of ________ pairs of elements from that set.,ordered,段落定义笛卡尔积由有序对组成；结构化文本遗漏了紧邻的二元关系完整定义。
+FB-0059,FB,supported,textbook14-r0093-c001,"A __________ key is used in asymmetric encryption for encryption, while a different key is used for decryption.",Public,
+FB-0061,FB,supported,textbook7-r0077-c000,A __________ is a device that monitors and controls incoming and outgoing network traffic based on predetermined security rules.,Firewall,
+FB-0067,FB,supported,textbook7-r0006-c000,__________ is a type of malware designed to replicate itself and spread to other systems without user intervention.,Worm,
+FB-0068,FB,not_found,,The process of examining malware to understand its behavior and purpose is called __________ analysis.,Malware,
+FB-0069,FB,partial,textbook8-r0402-c000,__________ is a type of malware that demands payment to restore access to encrypted files.,Ransomware,段落描述加密文件后勒索的行为，但未直接给出题目术语。
+FB-0072,FB,not_found,,The __________ phase of penetration testing involves identifying and exploiting vulnerabilities in the target system.,Exploitation,
+FB-0075,FB,not_found,,"Naive Bayes classification can use __ in cases of frequent data changes, where no training is done initially, and probability estimation is performed based on the current dataset upon receiving prediction requests.",lazy learning,
+FB-0079,FB,partial,textbook16-r0007-c034,The most commonly used metric for measuring the purity of a sample set is __.,information entropy,段落支持聚类与离群点关系，但答案术语需要归纳。
+FB-0080,FB,supported,textbook11-r0056-c005,"__ can be used to measure the attribute split selection in a decision tree. The larger the value, the greater the increase in information purity.",information gain,
+FB-0081,FB,supported,textbook11-r0017-c001,"__ routines work to “clean” the data by filling in missing values, smoothing noisy data, identifying or removing outliers, and resolving inconsistencies.",Data cleaning,
+FB-0083,FB,supported,textbook11-r0020-c003,"__ reduces the data set size by removing irrelevant or
+redundant attributes (or dimensions).",Attribute subset selection,
+FB-0090,FB,not_found,,The __________ problem refers to the challenge of making recommendations for new users or items with little data.,cold start,
+FB-0094,FB,supported,textbook19-r0068-c000,"In the __________ space model, documents and queries are represented as vectors in a multi-dimensional space.",vector,
+FB-0097,FB,supported,textbook19-r0068-c000,The __________ space model represents documents and queries as vectors in a multi-dimensional space.,vector,
+FB-0099,FB,supported,textbook19-r0320-c000,"Tf-idf stands for __________ frequency-inverse document frequency, a metric used to evaluate term importance.",term,
+FB-0100,FB,supported,textbook14-r0080-c002,The __________ component of tf-idf measures how frequently a term appears in a specific document.,term frequency,
+FB-0102,FB,supported,textbook19-r0322-c000,"An inverted index maps terms to __________ identifiers, enabling efficient document retrieval.",document,
+FB-0104,FB,not_found,,Maintaining an inverted index requires regular __________ to reflect changes in documents and user data.,updates,
+MC-0004,MC,supported,textbook13-r0004-c001,"In Java, a class specification",D,
+MC-0006,MC,supported,textbook13-r0031-c000,Stability might refer to,B,
+MC-0007,MC,partial,textbook13-r0043-c001,Which of the following is not true? A reference to a class object,B,段落支持引用大小固定这一概念，题目选项需要据此反推。
+MC-0018,MC,not_found,,"Is heapsort stable when sorting arrays [9, 6, 6] and [6, 6, 9]?",A,
+MC-0019,MC,supported,textbook15-r0031-c001,"After inserting elements with keys [56, 54, 50, 20, 45, 55, 47, 41, 40, 70, 30, 35, 65] into an empty binary heap, its depth is",D,
+MC-0020,MC,supported,textbook13-r0030-c000,Which of the following is true?,B,
+MC-0025,MC,supported,textbook2-r0012-c005,"Suppose we have a searching tree with depth 9 and branching factor 3. The goal state is in the 6th depth. If we use breadth-first search, what is the time complexity?",B,
+MC-0034,MC,supported,textbook13-r0026-c001,"In the selection sort,",B,
+MC-0046,MC,supported,textbook13-r0072-c000,"To transform the insertion sort into the Shellsort, which of the following do you not do?",D,
+MC-0057,MC,supported,textbook13-r0103-c000,Which of the following is not a red-black rule?,B,
+MC-0058,MC,data_issue,textbook13-r0097-c000,Which of the following is not involved in a rotation?,A,教材明确说明旋转会重排节点并保持二叉搜索树性质，与题目所标注的“not involved”答案 A 冲突。
+MC-0062,MC,not_found,,An external schema is ______.,A,
+MC-0066,MC,partial,textbook7-r0025-c012,"Compare GBN, SR, and TCP (no delayed ACK). Assume that the timeout values for all three protocols are sufficiently long such that 5 consecutive data segments and their corresponding ACKs can be received (if not lost in the channel) by the receiving host (Host B) and the sending host (Host A) respectively. Suppose Host A sends 5 data segments to Host B, and the 2nd segment (sent from A) is lost. In the end, all 5 data segments have been correctly received by Host B. If the timeout values for all three protocol are much longer than 5 RTT, then which protocol successfully delivers all five data segments in shortest time interval?",C,段落提供协议机制，正确选项仍需结合题干推断。
+MC-0067,MC,not_found,,"The lifetime for 5 processes, A-E, are as follows. For example, A: [0, 10] means process A starts at time 0 and ends at time 10. Select the pair of processes that execute concurrently.
+A: [0, 10], B: [13, 20], C: [8, 15], D: [3, 9], E: [16, 20]",D,
+MC-0076,MC,supported,textbook6-r0034-c000,What has led to the inclusion of memory hierarchy concepts in undergraduate courses?,C,
+MC-0077,MC,supported,textbook6-r0141-c001,What is a key characteristic of a distributed shared memory (DSM) multiprocessor?,C,
+MC-0081,MC,not_found,,Which of the following is true about a random sample from a population?,B,
+MC-0087,MC,not_found,,Find the minimum number of teachers in a college to be sure that four of them are born in the same month.,A,
+MC-0092,MC,partial,textbook15-r0232-c001,"What is the rank of the matrix [[1,2],[2,4]]?",B,段落给出秩的定义，具体矩阵答案需要计算。
+MC-0095,MC,data_issue,textbook3-r0028-c001,What is the probability of rolling a sum of 7 with two fair six-sided dice?,A,原始 Choices.A 将分数 1/6 错误解析为日期 2024-01-06；题干与 rationale 本身有效。
+MC-0111,MC,supported,textbook14-r0092-c002,Which of the following can help prevent Cross-Site Scripting (XSS) attacks?,A,
+MC-0113,MC,supported,textbook7-r0006-c000,Which type of malware is designed to replicate and spread to other systems?,A,
+MC-0118,MC,not_found,,What is the importance of obtaining permission before a penetration test?,A,
+MC-0123,MC,not_found,,Why is a separate dialog description notation useful in program design?,B,
+MC-0127,MC,not_found,,What is the primary focus of a cognitive walkthrough in evaluating an interface?,C,
+MC-0134,MC,partial,textbook16-r0001-c009,Which of the following quantities is likely to show more temporal autocorre-lation?,B,段落提供时间序列概念，具体例子需据此判断。
+MC-0142,MC,supported,textbook17-r0354-c000,"For a depthwise 3x3 convolution, the number of input channels and output channels are both 32, how many parameters does this convolution layer have",B,
+MC-0146,MC,supported,textbook16-r0001-c018,Which of the following best defines sampling?,C,
+MC-0149,MC,supported,textbook11-r0064-c000,Which of the following methods relies on the assumption of conditional independence between attributes?,D,
+MC-0154,MC,supported,textbook11-r0063-c000,Which does CART Decision Tree use for spliting attributes?,D,
+MC-0159,MC,supported,textbook11-r0091-c003,Which is not the family of proximity based apporoaches?,C,
+MC-0167,MC,not_found,,What is a primary technique used in collaborative filtering recommender systems?,C,
+MC-0168,MC,partial,textbook11-r0103-c007,Which technique is commonly used in content-based recommender systems?,B,段落支持距离与相似度概念，选项结论需要比较。
+MC-0172,MC,not_found,,What is the primary function of a web crawler?,A,
+MC-0180,MC,not_found,,"For the sentence “I go to school by bus.”. If there are 3, 5, and 11 synonyms for the words “go”, “school”, and “bus”, then how many possible meanings could be given by this sentence?",D,
+MC-0186,MC,supported,textbook19-r0170-c000,Which of the following parsing techniques is based on a set of production rules?,C,
+MC-0196,MC,supported,textbook10-r0000-c001|textbook10-r0250-c000,Which technique is NOT typically associated with 3D reconstruction?,C,
+MC-0201,MC,supported,textbook9-r0069-c003,Which of the following is a common application of computer vision in healthcare?,C,
+MC-0207,MC,supported,textbook2-r0054-c001,"Which equation best represents the declarative ideal in logic programming, where knowledge is expressed formally and problems are solved through inference processes?",A,
+MC-0210,MC,supported,textbook2-r0042-c003,"Why can the resolution rule, which applies to clauses, lead to a complete inference procedure for propositional logic?",B,
+MS-0001,MS,supported,textbook6-r0059-c000,Which of the following statements about protection and instruction set architecture are true? (Select all that apply),AC,
+MS-0003,MS,supported,textbook6-r0070-c000,Which of the following are types of dependences in pipelining and parallelism? (Select all that apply),ABC,
+MS-0004,MS,supported,textbook6-r0034-c001,Which of the following are categories of cache misses according to the three Cs model? (Select all that apply),ABC,
+MS-0005,MS,supported,textbook6-r0034-c003,Which of the following are metrics used for cache optimizations? (Select all that apply),ABD,
+MS-0010,MS,not_found,,"Given the multi-process program below, which of the following are infeasible output(s) of the program?
+PS: fflush(stdout) is a function to flush the standard output immediately, so that before the next printf() is invoked, the output buffer is empty.
+int main()
+{
+   printf(""A""); fflush(stdout);
+   if (fork() == 0){
+     printf(""B""); fflush(stdout);
+     if (fork() == 0){
+       printf(""C""); fflush(stdout);
+       exit(1);
+     }
+     printf(""D""); fflush(stdout);
+     exit(2);
+   }
+   printf(""C""); fflush(stdout);
+   exit(0);
+}",BCD,
+MS-0012,MS,supported,textbook19-r0071-c000,(multi-answer) Which of the following statements are true about cosine similarity of two data samples in vector representation? Select all that apply.,AD,
+MS-0015,MS,partial,textbook10-r0067-c002,(multi-answer) Which of the following statements about gradients are true? Select all that apply.,ACD,段落仅覆盖答案中的主要 XML 解析机制。
+MS-0018,MS,partial,textbook14-r0093-c002,Which algorithms are examples of symmetric encryption?,ACD,段落直接支持 AES，但未同时覆盖 3DES 与 Blowfish。
+MS-0019,MS,supported,textbook7-r0071-c004,What are common uses of public key encryption?,ABC,
+MS-0024,MS,partial,textbook14-r0092-c002,Which security measures can help protect against XSS attacks?,AB,段落支持输入验证，未直接覆盖 CSP。
+MS-0030,MS,partial,textbook7-r0022-c004,Which tools are commonly used in penetration testing?,ABD,段落直接支持 Nmap，未覆盖全部所选工具。
+MS-0031,MS,not_found,,Which legal considerations are important in ethical hacking?,ABC,
+MS-0038,MS,not_found,,Which of the following expert-based approaches can be used in the evaluation of design specifications?,ABCD,
+MS-0039,MS,not_found,,Which of the following methods are used for evaluating systems through user participation?,ABC,
+MS-0040,MS,not_found,,Which of the following categories are used to classify cognitive models according to their focus on either task acquisition or plan execution? (Select all that apply.),ABC,
+MS-0041,MS,not_found,,Which of the following statements are true regarding Cognitive Complexity Theory (CCT) as discussed?,ACD,
+MS-0042,MS,not_found,,"Consider the DAG X 1 ← X 2 → X 3.AssumethatalltheCPDsarelinear-Gaussian.Whichofthe 
+ following mat rices could be the covariance matrix?",AD,
+MS-0046,MS,partial,textbook14-r0096-c001|textbook14-r0106-c002,Which of the following statements about the application of data analytics are true? Select all that apply.,ABCD,段落直接覆盖模式、预测、决策和营销示例，但未逐项充分支持答案中的流程优化及全部行业。
+MS-0050,MS,not_found,,Which of the following are types of linear regression models?,AC,
+MS-0052,MS,not_found,,Which attribute dependencies are considered by the semi-naive Bayes classifier?,ABCD,
+MS-0054,MS,partial,textbook17-r0509-c000,Which are common external metrics for evaluating clustering performance?,ABD,段落仅直接覆盖 Rand 指标。
+MS-0056,MS,supported,textbook16-r0003-c021|textbook16-r0003-c027,Which are strategies for Decision Tree to optimize spliting process?,ABC,
+MS-0062,MS,supported,textbook11-r0097-c000|textbook11-r0097-c001,Which does outlier detection methods for high-dimensional data meet the challenges?,ABCD,
+MS-0063,MS,partial,textbook20-r0166-c001,Which of the following are common approaches used in recommender systems?,ABD,段落覆盖协同、内容和混合推荐，未覆盖 demographic。
+MS-0065,MS,partial,textbook19-r0322-c000,Which metrics are commonly used to evaluate recommender systems?,ABCD,段落覆盖 precision 与 recall，未覆盖全部所选指标。
+MS-0067,MS,not_found,,Which components are essential for a web search engine?,ABC,
+MS-0068,MS,not_found,,What techniques are commonly used to improve search relevance?,ABD,
+MS-0069,MS,not_found,,Which models are commonly used in information retrieval?,ABC,
+MS-0077,MS,not_found,,What are the limitations of using tf-idf?,ABD,
+MS-0082,MS,partial,textbook19-r0013-c001,Which of the following techniques are commonly used in Morphological Analysis for Natural Language Processing?,ABD,段落仅支持答案中的部分语言学资源。
+MS-0084,MS,partial,textbook20-r0026-c000,Which of the following are challenges faced in Semantic Analysis?,ABC,段落支持部分文本处理步骤，未覆盖全部选项。
+MS-0087,MS,partial,textbook20-r0026-c000,"In the context of NLP applications, which of the following statements are true?",ABD,段落支持部分文本处理步骤，未覆盖全部选项。
+MS-0093,MS,partial,textbook10-r0022-c001,Which image processing techniques are commonly used for enhancing an image? (Select all that apply),AB,段落直接覆盖直方图均衡；只提到噪声放大，未提供降噪技术的充分证据。
+MS-0094,MS,partial,textbook20-r0036-c000,"In image processing, which of the following operations can be used for feature extraction?",ACD,段落支持部分 WordNet 关系，未覆盖全部所选关系。
+MS-0095,MS,supported,textbook10-r0089-c002|textbook10-r0097-c002,Which of the following algorithms are known for object detection tasks?,ABD,
+MS-0096,MS,not_found,,"In the context of object detection, what do the terms ""contained"" and ""partially visible"" refer to?",ABC,
+MS-0101,MS,supported,textbook2-r0054-c001|textbook2-r0054-c002,Which of the following statements are true about Prolog's execution and design? (Select all that apply.),ACD,
+MS-0103,MS,supported,textbook2-r0042-c006|textbook2-r0042-c007,Which of the following statements are true regarding knowledge bases containing only definite clauses?,ACD,
+MS-0104,MS,supported,textbook2-r0043-c005|textbook2-r0044-c000,Which of the following statements are true about how a logical agent operates using its knowledge base?,BC,
+MS-0107,MS,supported,textbook2-r0072-c001|textbook2-r0072-c002,Which of the following are true about the semantic network notation and its inheritance reasoning capabilities?,AC,
+OE-0002,OE,partial,textbook1-r0007-c000,Computational thinking should come before programming. Why?,Make sure the problem is well understood and the steps of the solution are logically articulated so that the steps can easily and properly transformed into programming code.,段落支持伪代码与基本步骤，但未直接论证 computational thinking 应先培养。
+OE-0004,OE,supported,textbook13-r0006-c001,"When all references to a link are changed to refer to something else by Java, what happens to the link?",Java's garbage collection process destroys it.,
+OE-0005,OE,partial,textbook13-r0075-c001,"How many ""null"" references in a binary tree of n nodes?",n+1,段落给出树的节点关系，n+1 结论需要推导。
+OE-0008,OE,not_found,,"This subject has 327 registered students. Suppose I keep your IDs in a sorted array. If I use binary search to search for a student in this array, and I find her record in three steps. The possible indices for her ID in the array are:","81, 163, 245",
+OE-0009,OE,partial,textbook15-r0012-c001,"Arrange the following functions in increasing order of growth rate (if f(n) precedes g(n), then f(n) = O(g(n)):11log(n^2) - 5logn, n/2011, 2^2011, 2011^2, n^2 - 2011n","20112,22011,11log(n2)−5logn,2011n​,n2−2011n",段落支持渐近分析方法，具体结论需要计算。
+OE-0028,OE,supported,textbook11-r0018-c003,"Robust data loading poses a challenge in database systems because the input data are often dirty. In many 
+ cases, an input record may miss multiple values, some records could be contaminated, with some data values 
+ out of range or of a diﬀerent data type than expected. Work out an automated data cleaning and loading 
+ algorithm so that the erroneous data will be marked, and contaminated data will not be mistakenly inserted 
+ into the database during data loading. How can we apply automated procedure on these problems?","• Use metadata (e.g., domain, range, dependency, distribution).
+ • Check unique rule, consecutive rule and null rule.
+ • Check ﬁeld overloading.
+ • Spell-checking. • Detect diﬀerent attribute names which actually have the same meaning.
+ • Use domain knowledge to detect errors and make corrections.",
+OE-0043,OE,supported,textbook7-r0011-c006,What is meant by a handshaking protocol?,A protocol uses handshaking if the two communicating entities first exchange control packets before sending data to each other. SMTP uses handshaking at the application layer whereas HTTP does not.,
+OE-0047,OE,not_found,,What is an overlay network? Does it include routers? What are the edges in the overlay network?,The overlay network in a P2P file sharing system consists of the nodes participating in the file sharing system and the logical links between the nodes. There is a logical link (an “edge” in graph theory terms) from node A to node B if there is a semi-permanent TCP connection between A and B. An overlay network does not include routers.,
+OE-0057,OE,supported,textbook7-r0051-c011|textbook7-r0051-c012,What is the fundamental difference between a router and link-layer switch?,A router forwards a packet based on the packet’s IP (layer 3) address. A link-layer switch forwards a packet based on the packet’s MAC (layer 2) address.,
+OE-0063,OE,not_found,,What is meant by the term “route aggregation”? Why is it useful for a router to perform route aggregation?,Route aggregation means that an ISP uses a single prefix to advertise multiple networks. Route aggregation is useful because an ISP can use this technique to advertise to the rest of the Internet a single prefix address for the multiple networks that the ISP has.,
+OE-0067,OE,supported,textbook7-r0041-c002,Describe how loops in paths can be detected in BGP.,"Since full AS path information is available from an AS to a destination in BGP, loop detection is simple – if a BGP peer receives a route that contains its own AS number in the AS path, then using that route would result in a loop.",
+OE-0071,OE,supported,textbook7-r0065-c000|textbook7-r0065-c001,What are three approaches that can be taken to avoid having a single wireless link degrade the performance of an end-to-end transport-layer TCP connection?,"a) Local recovery
+b) TCP sender awareness of wireless links
+c) Split-connection approaches",
+OE-0075,OE,partial,textbook4-r0047-c001,"Assuming 12-bit 2’s complement representation, the hexadecimal number FD2 is equal to the decimal number:",-46,段落给出带宽时延相关概念，数值答案需要计算。
+OE-0077,OE,not_found,,"The following code fragment occurs often in the compiled version of library 
+routines:
+1 call next
+2 next:
+3 popl %eax Explain why there is no matching ret instruction to this call.","This is not a true procedure call, since the control follows the same ordering 
+as the instructions and the return address is popped from the stack.",
+OE-0078,OE,not_found,,"Have you ever wondered why a C main routine can end with a call to exit,a 
+ return statement, or neither, and yet the program still terminates properly? 
+ Explain.","If main terminates with a return statement, then control passes back to 
+ the startup routine, which returns control to the operating system by calling 
+ _exit. The same behavior occurs if the user omits the return statement. If 
+ main terminates with a call to exit, then exit eventually returns control to 
+ the operating system by calling _exit. The net effect is the same in all three 
+ cases: when main has ﬁnished, control passes back to the operating system.",
+OE-0081,OE,supported,textbook6-r0007-c002,"How do control flow instructions differ among MIPS, 80x86, and ARM regarding procedure calls and return addresses?","MIPS and ARM store return addresses in a register, while 80x86 uses the stack in memory for return addresses, highlighting differences in their control flow handling.",
+OE-0101,OE,partial,textbook12-r0044-c001,What is the significance of eigenvalues and eigenvectors in linear algebra?,"Eigenvalues and eigenvectors reveal important properties of matrices, such as stability and modes of transformation, and are used in various applications like differential equations and quantum mechanics.",段落支持 PCA 应用与降维作用，答案需综合归纳。
+OE-0103,OE,supported,textbook10-r0251-c000|textbook17-r0276-c001,How can you use matrix decomposition techniques in practical applications?,"Matrix decomposition techniques like LU, QR, and SVD are used in solving linear systems, optimizing computations, and analyzing data.",
+OE-0110,OE,partial,textbook17-r0197-c000,Explain the concept of a limit in calculus.,A limit describes the value that a function approaches as the input approaches a certain point.,段落以极限定义导数，但未单独完整定义极限。
+OE-0119,OE,supported,textbook15-r0182-c003|textbook15-r0182-c004,"In the RSA public-key encryption scheme, each user has a public key, e, and a private key, d. Suppose Bob leaks his private key d. Rather than generating a new modulus, he decides to generate a new public key and a new private key. Is this safe? Explain.","No. If n = p * q is not changed, for any new e’ not equal e, adversary will be able to calculate the new corresponding d’ easily by the following steps:
+ 1. Public key = (n, e) is known to adversary at any time. 
+ 2. After Bob leaks his secret key d, adversary will be able to obtain extra information and calculate phi(n). The number of possible values of phi(n) is greatly reduced, i.e., for k a positive integer, phi(n) = (e*d – 1)/k and k < min{e, d}. By fixing e’, the possible values of d’ can be obtained. The adversary can simply check if m = (m^e’)^d’ mod n to determine whether phi (n) and d’ is the correct one.
+ 3. For any new public key e’, the property for e’ * d’ = 1 mod phi (n) still holds, since Bob used this to generate his new d’.
+ 4. Since both phi(n) and e’ are known, adversary can derive the value of new secret key d’ easily by extended Euclidean algorithm",
+OE-0126,OE,not_found,,"Consider the following simple password-based authentication system. A secret key X is embedded inside the application software. The application software requires access to a file called userlist.txt for its functioning. userlist.txt is a text file recording the list of legitimate users. Each line in userlist.txt records the login credential of a user and is of the following format: USERID#SALT#SH#HMAC, where the character # is used as a separator. The fields are explained below.
+ USERID: ID of the user
+ SALT: A random string of 64 bits
+ SH: Hash of the salt concatenated with the user’s password. SHA-1 is used. 
+ HMAC: HMAC of salt concatenated with SH using X as the secret key. Again, SHA-1 is used and HMAC is 160 bits.
+ Discuss the conditions under which this authentication system is secure.","Case I: Attacker cannot read userlist.txt. Then only online password guessing is possible. Restricted attempts should be sufficient.
+ Case II: Attacker can read userlist.txt. Offline dictionary attack is possible. Require SHA-1 to be one-way and passwords are of high entropy.
+ Case III: Attacker can modify userlist.txt. Attacker may create a new entry. In this case, we need to ensure the attacker cannot get X from the implementation. That is why we need HMAC = H(SALT||SH||X) to prevent the attacker from forging this value.",
+OE-0139,OE,partial,textbook8-r0372-c000|textbook8-r0373-c000,"Under DES, The programmer adopts electronic codebook (ECB) as the mode of operation. Comment on the performance and security of his choice.","For performance, each block can be encrypted/decrypted separately and thus can be performed in a parallel manner.
+ 
+ For security, the same plaintext always produces the same ciphertext. Statistical analysis is made easier if there exists non-evenly distributed occurrence of the plaintext information.",段落支持 ECB 重复块与安全缺陷，并行性未被直接说明。
+OE-0147,OE,supported,textbook7-r0070-c011,Can the Diffie-Hellman algorithm provide the authentication mechanism? Show your reasons.,"The Diffie-Hellman algorithm cannot provide the authentication mechanism. It is used for key exchange. Both sides can get the same secret symmetric key for message encryption/decryption, but not for message authentication.",
+OE-0150,OE,supported,textbook14-r0264-c004|textbook14-r0265-c000,Explain the collision resistance and one-wayness of cryptographic hash functions.,"Collision-resistance: Hard to find two messages (pre-images) hashes to the same hash (image)
+ One-wayness: Hard to find the pre-image given an image",
+OE-0163,OE,not_found,,List a few characteristics to classify rootkits.,"Persistence: Rootkits often employ techniques to maintain their presence on a system, surviving reboots and updates.
+Stealthiness: They are designed to hide their presence, making detection difficult by concealing files, processes, and system modifications.
+Privilege Escalation: Many rootkits exploit vulnerabilities to gain higher privileges, allowing them to manipulate the system undetected.",
+OE-0166,OE,not_found,,How do “The Rules” differ from a professional code of ethics?,"“The Rules” and a professional code of ethics differ in several key aspects:
+1. Nature and Purpose
+The Rules: Typically refer to specific, often formalized regulations or guidelines that dictate acceptable behavior within a profession or organization. They are often legally binding and focus on compliance.
+Professional Code of Ethics: A broader set of principles that outline the moral standards and ethical responsibilities of professionals. It emphasizes values such as integrity, honesty, and respect.
+2. Flexibility
+The Rules: Generally less flexible and more prescriptive, providing clear dos and don’ts that must be followed.
+Professional Code of Ethics: More flexible, allowing for interpretation and adaptation to varying situations and ethical dilemmas.
+3. Focus
+The Rules: Focus on specific behaviors and actions that are permissible or prohibited, often related to legal or organizational standards.
+Professional Code of Ethics: Focuses on guiding professionals in making ethical decisions, promoting a culture of ethical awareness and responsibility.
+4. Scope
+The Rules: Often limited to regulatory compliance and may not address broader ethical considerations.
+Professional Code of Ethics: Broader in scope, addressing general principles that guide the conduct of professionals beyond mere compliance.
+5. Enforcement
+The Rules: Typically enforced through specific penalties or disciplinary actions for violations.
+Professional Code of Ethics: While violations can lead to disciplinary actions, enforcement is often based on peer review and self-regulation rather than formal legal repercussions.
+In summary, while “The Rules” provide specific guidelines for behavior, a professional code of ethics offers a framework of moral principles that help professionals navigate complex ethical situations.",
+OE-0175,OE,not_found,,What are the three main goals of evaluation in the design of interactive systems?,"The three main goals of evaluation are to assess the system's functionality and accessibility, to evaluate users’ experience of the interaction, and to identify specific problems within the system.",
+OE-0179,OE,partial,textbook17-r0260-c000,"Assume that there is a classification problem with $6$ classes. Each instance has $8$ features. What is the total number of parameters, if you are solving it by using linear logistic regression and one-vs-all approach? Remember to include $\theta_0$.",54,段落给出多项逻辑回归参数结构，54 需要代入维数计算。
+OE-0182,OE,supported,textbook19-r0319-c001,"Consider a document-term matrix, where tfij is the frequency of the ith word 
+(term) in the j th document and m is the number of documents. Consider the 
+variable transformation that is deﬁned by $t f_{i j}^{\prime}=t f_{i j} * \log \frac{m}{d f_i}$ where df i is the number of documents in which the ith term appears, which 
+is known as the document frequency of the term. This transformation is 
+known as the inverse document frequency transformation. What is the eﬀect of this transformation if a term occurs in one document? 
+In every document? What might be the purpose of this transformation?","Terms that occur in every document have 0 weight, while those that 
+occur in one document have maximum weight, i.e., log m. This normalization reflects the observation that terms that occur in 
+every document do not have any power to distinguish one document 
+from another, while those that are relatively rare do.",
+OE-0199,OE,supported,textbook11-r0085-c007|textbook11-r0077-c000,"Compare the SCAN algorithm with DBSCAN. What are their similarities 
+ and diﬀerences?","Similarities: Both methods are density-based, and follow similar frameworks. Both use the mecha- 
+ nisms of ϵ-neighborhoods and core ob jects/vertices to grow clusters.
+ Diﬀerences: The similarity between points in DBSCAN and that between vertices in SCAN are dif- 
+ ferent, due to the diﬀerent types of data. SCAN identiﬁes hubs and outliers. DBSCAN does not 
+ ﬁnd any hub points.",
+OE-0202,OE,not_found,,"Consider the problem of ﬁnding the K nearest neighbors of a data object. A 
+ programmer designs Algorithm for this task. 
+1: for i =1 to number of data objects do
+ 2: Find the distances of the ith object to all other objects.
+ 3: Sort these distances in decreasing order.
+ (Keep track of which ob ject is associated with each distance.)
+ 4: return the ob jects associated with the ﬁrst K distances of the sorted list 
+ 5: end for$ Describe the potential problems with this algorithm if there are duplicate 
+ ob jects in the data set. Assume the distance function will only return a 
+ distance of 0 for ob jects that are the same.","First, the order of duplicate objects on a nearest neighbor list will depend on details of the algorithm and the 
+ order of objects in the data set. Second, if there are enough duplicates, 
+ the nearest neighbor list may consist only of duplicates. Third, an object 
+ may not be its own nearest neighbor.",
+OE-0206,OE,not_found,,What method is used to solve the problem when we do not know the dependency network structure between the data?,"The primary task in Bayesian network learning is to find the most appropriate Bayesian network structure based on training data. Scoring search is a common approach to solving this problem. It involves defining a scoring function to assess how well the Bayesian network fits the training data, and then using this function to find the optimal network structure.",
+OE-0212,OE,supported,textbook11-r0021-c000,Please simply discribe the Concept hierarchy generation for nominal data.,"In this step of data pre-processing, attributes such as street can be generalized to higher-level concepts, like city or country. Many hierarchies for nominal attributes are implicit within the database schema and can be automatically defined at the schema definition level.",
+OE-0228,OE,not_found,,How would you create the dictionary in blocked sort-based indexing on the ﬂy to avoid an extra pass through the data?,"To create the dictionary in blocked sort-based indexing on the fly and avoid an extra pass through the data, you can follow these steps:
+Read and Process Data in Blocks: As you read the input data, divide it into manageable blocks. For each block, extract the terms and their associated document IDs.
+Maintain a Dynamic Dictionary: While processing each block, maintain a dictionary (or a hash table) that records the unique terms encountered along with their corresponding postings lists (document IDs).
+Sort and Merge: After processing each block, sort the terms within that block. You can then merge the sorted terms into the overall dictionary dynamically, combining postings lists for terms that appear in multiple blocks.
+Output the Dictionary: Once all blocks have been processed, the dictionary will be complete, and you will have avoided an extra pass through the data.",
+OE-0232,OE,partial,textbook11-r0103-c008|textbook11-r0104-c000,What challenges are associated with developing hybrid recommendation systems that combine collaborative and content-based filtering approaches?,"Challenges include data sparsity, cold start problems, and effectively blending the strengths of different filtering methods.",段落支持混合方法与融合预测器，但未充分覆盖答案中的数据稀疏和冷启动。
+OE-0233,OE,supported,textbook12-r0451-c000|textbook12-r0452-c000,How can matrix factorization techniques such as Singular Value Decomposition (SVD) enhance the quality of recommendations in collaborative filtering?,"SVD helps identify latent factors in user-item interactions, enabling precise and personalized recommendations.",
+OE-0236,OE,supported,textbook19-r0013-c001|textbook12-r0319-c002,Explain the concepts of stemming and lemmatization in morphological analysis. How do they differ?,"Stemming is the process of reducing a word to its base or root form by removing prefixes and suffixes, often without regard to the actual meaning (e.g., ""running"" becomes ""run""). Lemmatization, on the other hand, reduces a word to its base form (lemma) based on its meaning and context (e.g., ""better"" becomes ""good""). The key difference is that stemming may produce non-words, while lemmatization always results in valid words.",
+OE-0251,OE,supported,textbook10-r0194-c000|textbook2-r0158-c002,Describe how computer vision technologies are applied in autonomous vehicles and the benefits they provide.,"In autonomous vehicles, computer vision technologies are used for various tasks, including object detection and recognition, which involves identifying other vehicles, pedestrians, traffic signs, and obstacles to enable safe navigation. Additionally, lane detection is another critical application, where the system recognizes road markings to help maintain the vehicle in the correct lane. The benefits of these technologies include improved safety through the reduction of human errors, enhanced situational awareness for the vehicle, and the ability to operate in complex environments. By leveraging computer vision, autonomous vehicles can make informed decisions in real-time, significantly enhancing their functionality and safety.",
+OE-0263,OE,not_found,,How does multiple inheritance complicate the process of inheritance reasoning in knowledge representation systems?,Multiple inheritance complicates inheritance reasoning because an object belonging to multiple categories or categories overlapping can create conflicts or ambiguities in determining inherited properties.,
+OE-0267,OE,supported,textbook2-r0062-c006|textbook2-r0063-c003,How does classical planning differ from scheduling in the context of managing actions and time?,"Classical planning focuses on the order and sequence of actions without considering time, whereas scheduling involves specifying how long actions take and their precise timing, such as departure and arrival times.",
+TF-0014,TF,supported,textbook13-r0025-c004,"If there are N items, the bubble sort makes exactly N*N comparisons.",False,
+TF-0015,TF,supported,textbook13-r0039-c000,A stack or a queue often serves as the underlying mechanism on which an ADT array is based.,False,
+TF-0016,TF,partial,textbook13-r0039-c000,Pushing and popping items on a stack and inserting and removing items in a queue all take O(N) time.,False,段落支持递归二分思想，题目绝对化表述需结合条件判断。
+TF-0030,TF,supported,textbook7-r0012-c006,The Date: header in the HTTP response message indicates when the object in the response was last modified.,False,
+TF-0033,TF,not_found,,Obtain the HTTP/1.1 specification (RFC 2616). Either a server or a client may close a transport connection between them if either one detects the connection has been idle for some time. Is it possible that one side starts closing a connection while the other side is transmitting data via this connection?,True,
+TF-0045,TF,not_found,,Suppose that the last SampleRTT in a TCP connection is equal to 1 sec. The current value of TimeoutInterval for the connection will necessarily be ≥1 sec.,False,
+TF-0053,TF,supported,textbook7-r0032-c007,The HOL blocking occurs in input ports.,True,
+TF-0060,TF,supported,textbook7-r0040-c001,"When an OSPF route sends its link state information, it is sent only to those nodes directly attached neighbors.",False,
+TF-0061,TF,not_found,,"A packet flow is said to conform to a leaky bucket specification (r, b) with burst size b and average rate r if the number of packets that arrive to the leaky bucket is less than rt+b packets in every interval of time of length t for all t. Will a packet flow that conforms to a leaky bucket specification (r, b) ever have to wait at a leaky bucket policer with parameters r and b?",False,
+TF-0071,TF,not_found,,Suppose an SSL session employs a block cipher with CBC. True or false: The server sends to the client the IV in the clear.,True,
+TF-0089,TF,not_found,,The alternating-bit protocol is the same as the GBN protocol with a sender and receiver window size of 1.,True,
+TF-0093,TF,supported,textbook7-r0032-c005,Suppose two packets arrive to two different input ports of a router at exactly the same time. Also suppose there are no other packets anywhere in the router. Suppose the two packets are to be forwarded to the same output port. Is it possible to forward the two packets through the switch fabric at the same time when the fabric uses a crossbar?,False,
+TF-0103,TF,supported,textbook7-r0067-c001,"Consider a TCP connection going over Mobile IP. True or false: The TCP connection phase between the correspondent and the mobile host goes through the mobile’s home network, but the data transfer phase is directly between the correspondent and the mobile host, bypassing the home network.",False,
+TF-0108,TF,not_found,,"Let p denote the number of producers, c the number of consumers, and n the buffer size in units of items. The mutex semaphore in sbuf_insert and sbuf_remove is necessary when p = 1, c = 1, n>1",True,
+TF-0117,TF,supported,textbook4-r0240-c002,The principle of locality states that programs access all code and data uniformly.,False,
+TF-0120,TF,supported,textbook6-r0180-c000,Service level objectives (SLOs) specify performance goals for average latency rather than for the percentage of requests below a specific latency threshold.,False,
+TF-0125,TF,supported,textbook11-r0004-c000,"Descriptive statistics can be generalized beyond the data sample, whereas inferential statistics only describe the data you have.",False,
+TF-0127,TF,partial,textbook11-r0013-c008,The cosine similarity of two vectors can be negative.,True,段落支持一般规则，但未逐字覆盖题目表述。
+TF-0132,TF,not_found,,"If P (a | b, c)=P (a), then P (b | c)=P (b)",False,
+TF-0151,TF,supported,textbook15-r0063-c007,A good cryptographic hash function should always produce a fixed-length output.,True,
+TF-0153,TF,partial,textbook7-r0077-c000,Firewalls can prevent all types of cyber attacks.,False,段落支持安全机制的一部分，判断需结合题目限定。
+TF-0166,TF,not_found,,Our perception of size relies on the visual angle,False,
+TF-0177,TF,not_found,,"Cognitive models represent users' interaction with interfaces by varying levels of detail, from high-level goals and problem-solving to motor-level activities like keystrokes, and are developed by psychologists or computer scientists.",True,
+TF-0181,TF,supported,textbook2-r0118-c002,"In the gradient descent algorithm, sometimes we need to adjust the learning rate and make it negative, so that we could better performance.",False,
+TF-0184,TF,not_found,,Gradient descent algorithm is one type of supervised machine learning technique.,False,
+TF-0188,TF,supported,textbook11-r0064-c002|textbook11-r0064-c000,A Bayesian Belief Net consists of a graph and some local conditional probabilities.,True,
+TF-0219,TF,supported,textbook11-r0021-c007,"In the step of preprocessing, tuple duplication is not needed at all.",False,
+TF-0223,TF,supported,textbook11-r0089-c001,"Outlier detection (also known as anomaly detection) is the process of finding data
+objects with behaviors that are very different from expectation.",True,
+TF-0230,TF,supported,textbook11-r0103-c006,Content-based filtering analyzes the characteristics of items previously liked by a user.,True,
+TF-0237,TF,supported,textbook19-r0319-c000|textbook19-r0072-c001,The term frequency component of tf-idf decreases the weight of common terms.,False,
+TF-0243,TF,partial,textbook19-r0019-c002,The parameter size will remain unchanged given a larger N in N-gram models because of the Markov assumption.,False,段落支持语义角色概念，题目中的全称判断需结合上下文。
+TF-0251,TF,supported,textbook20-r0026-c000,Natural Language Processing can only be applied to written text and not to spoken language.,False,
+TF-0257,TF,supported,textbook16-r0004-c022,Artificial Neural Networks (ANNs) are inspired by the biological neural networks found in the human brain.,True,
+TF-0264,TF,not_found,,You Only Look Once (YOLO) is a popular object detection algorithm that performs detection in a single pass through the network.,True,
+TF-0276,TF,supported,textbook2-r0009-c002,It is possible for a given agent to be perfectly rational in two distinct task environments.,True,
+TF-0281,TF,not_found,,"According to some political pundits, a person who is radical (R) is electable (E ) if he/she is conservative (C ), but otherwise is not electable. Can the sentence be expressed in Horn form:R ⇒ ((C ⇒ E ) ∨ ¬E )",True,
+TF-0286,TF,not_found,,"For the following data set, data privacy is an important issue: census data collected from 1900–1950.",False,
+TF-0298,TF,not_found,,"Here are two sentences in the language of ﬁrst-order logic: (A) ∀ x ∃ y (x ≥ y ) (B) ∃ y ∀ x (x ≥ y ). Assume that the variables range over all the natural numbers 0, 1, 2,... ,∞ and that the “≥” predicate means “is greater than or equal to.” Does (A) logically entail (B)?",False,
+TF-0303,TF,supported,textbook2-r0053-c005,"In backward chaining, FOL-BC-ASK(KB, goal) can return multiple results when the goal contains variables, as it considers all possible substitutions that can satisfy the query.",True,
+TF-0306,TF,supported,textbook2-r0041-c003,The initial construction of a knowledge base for the wumpus world focuses on both immutable and mutable aspects of the environment.,False,

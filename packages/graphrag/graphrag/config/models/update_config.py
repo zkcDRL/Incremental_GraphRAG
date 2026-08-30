@@ -38,6 +38,29 @@ class UpdateConfig(BaseModel):
         le=3,
         description="局部更新时从直接受影响社区扩展的社区图跳数。",
     )
+    max_consecutive_local_updates: int = Field(
+        default=20,
+        ge=1,
+        description="触发全图 seeded Leiden 的累计局部更新次数。",
+    )
+    max_cumulative_edge_change_ratio: float = Field(
+        default=0.10,
+        ge=0,
+        le=1,
+        description="触发全图 seeded Leiden 的累计边变更比例。",
+    )
+    max_cumulative_membership_churn: float = Field(
+        default=0.10,
+        ge=0,
+        le=1,
+        description="触发全图 seeded Leiden 的累计成员变更率。",
+    )
+    max_modularity_drop: float = Field(
+        default=0.01,
+        ge=0,
+        le=1,
+        description="相对基线模块度允许下降的最大比例。",
+    )
 
     @model_validator(mode="after")
     def _validate_community_thresholds(self) -> "UpdateConfig":

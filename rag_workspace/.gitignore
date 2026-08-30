@@ -1,0 +1,10 @@
+# Runtime data and secrets
+.env
+output/
+update_output/
+cache/
+logs/
+
+# Keep the input directory available without committing private documents
+input/*
+!input/.gitkeep

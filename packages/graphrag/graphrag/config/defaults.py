@@ -331,6 +331,10 @@ class UpdateDefaults:
     local_community_ratio: float = 0.05
     cold_start_edge_ratio: float = 0.10
     community_hops: int = 1
+    max_consecutive_local_updates: int = 20
+    max_cumulative_edge_change_ratio: float = 0.10
+    max_cumulative_membership_churn: float = 0.10
+    max_modularity_drop: float = 0.01
 
 
 @dataclass

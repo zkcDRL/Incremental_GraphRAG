@@ -1,0 +1,51 @@
+{
+  "dataset_root": "C:\\Users\\32842\\Downloads\\GraphRAG-Bench",
+  "input_candidate_file": "graphrag_bench_evidence_200.jsonl",
+  "reviewed_output_file": "graphrag_bench_evidence_200_reviewed.jsonl",
+  "review_summary_file": "graphrag_bench_evidence_200_review_summary.csv",
+  "primary_eval_qrels_file": "graphrag_bench_evidence_200_supported.qrels.tsv",
+  "total_questions": 200,
+  "counts_by_status": {
+    "data_issue": 2,
+    "not_found": 61,
+    "partial": 36,
+    "supported": 101
+  },
+  "counts_by_type_and_status": {
+    "FB": {
+      "not_found": 9,
+      "partial": 5,
+      "supported": 26
+    },
+    "MC": {
+      "data_issue": 2,
+      "not_found": 11,
+      "partial": 5,
+      "supported": 22
+    },
+    "MS": {
+      "not_found": 14,
+      "partial": 13,
+      "supported": 13
+    },
+    "OE": {
+      "not_found": 13,
+      "partial": 9,
+      "supported": 18
+    },
+    "TF": {
+      "not_found": 14,
+      "partial": 4,
+      "supported": 22
+    }
+  },
+  "primary_retrieval_eval_rule": "Use only support_status=supported. partial can be reported separately; exclude not_found and data_issue.",
+  "status_definitions": {
+    "supported": "The selected local textbook chunk(s) directly support the gold answer.",
+    "partial": "The chunk(s) support only part of the answer or require a nontrivial derivation.",
+    "not_found": "No adequate supporting chunk was identified in the local textbook corpus.",
+    "data_issue": "The question record contains a material serialization/content defect and is excluded from primary evaluation."
+  },
+  "is_official_ground_truth": false,
+  "warning": "This is a manually reviewed local derivative annotation, not an official GraphRAG-Bench evidence release."
+}

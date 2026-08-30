@@ -1,0 +1,69 @@
+{
+  "dataset_root": "C:\\Users\\32842\\Downloads\\GraphRAG-Bench",
+  "output_file": "graphrag_bench_evidence_200.jsonl",
+  "selection": {
+    "strategy": "proportional Level-1 Topic sampling within each question type",
+    "seed": 42,
+    "per_type": 40,
+    "total": 200
+  },
+  "chunking": {
+    "source": "textbookN_structured.json content",
+    "chunk_size_words": 600,
+    "chunk_overlap_words": 75,
+    "total_chunks": 14714
+  },
+  "counts": {
+    "question_type": {
+      "FB": 40,
+      "MC": 40,
+      "MS": 40,
+      "OE": 40,
+      "TF": 40
+    },
+    "confidence": {
+      "high": 76,
+      "low": 51,
+      "medium": 73
+    },
+    "evidence_per_question": {
+      "1": 21,
+      "2": 44,
+      "3": 135
+    },
+    "level_1_topic": {
+      "Artificial intelligence introduction": 13,
+      "Computer Architecture": 1,
+      "Computer Network": 2,
+      "Computer Networks": 1,
+      "Computer Vision": 7,
+      "Computer architecture": 10,
+      "Computer networks": 14,
+      "Computer vision": 2,
+      "Cybersecurity": 23,
+      "Data Science": 1,
+      "Data Structure and Algorithm": 5,
+      "Data science and big data": 11,
+      "Data structures and algorithms": 18,
+      "Database": 1,
+      "Database systems": 1,
+      "Ethics (of computer science and AI)": 1,
+      "Human-computer interaction": 9,
+      "Information Retrieval": 1,
+      "Information retrieval": 21,
+      "Machine Learning": 2,
+      "Machine learning": 11,
+      "Mathematics": 14,
+      "Mathematics (for computer science and AI)": 6,
+      "Meaching learning": 3,
+      "NLP": 6,
+      "Natural Language Processing": 1,
+      "Natural language processing": 1,
+      "Operating systems": 4,
+      "Programming fundamentals": 6,
+      "Programming languages and compilers": 3,
+      "Programming languages and compilers\t": 1
+    }
+  },
+  "warning": "These are reproducible candidate evidence annotations, not official GraphRAG-Bench supporting-passage labels. Review needs_manual_review rows before treating them as gold."
+}

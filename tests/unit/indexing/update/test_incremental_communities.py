@@ -4,11 +4,16 @@
 """Tests for adaptive incremental community strategy helpers."""
 
 import pandas as pd
+import pytest
 from graphrag.index.update.communities import (
+    CommunityDriftState,
     CommunityUpdateStrategy,
     _expand_communities,
     _reconcile_ids,
     changed_edge_keys,
+    drift_threshold_reasons,
+    relative_modularity_drop,
+    root_membership_churn,
     select_strategy,
 )
 
@@ -135,3 +140,56 @@ def test_reconcile_ids_preserves_best_jaccard_match_and_uuid():
     assert set(reconciled["community"]) == {10, 20}
     assert reconciled.set_index("community").loc[10, "id"] == "old-10"
     assert reconciled.set_index("community").loc[20, "id"] == "old-20"
+
+
+def test_drift_thresholds_trigger_at_configured_boundaries():
+    state = CommunityDriftState(
+        consecutive_local_updates=20,
+        cumulative_edge_change_ratio=0.10,
+        cumulative_membership_churn=0.10,
+        baseline_modularity=0.5,
+        current_modularity=0.495,
+        modularity_drop=0.01,
+    )
+    assert drift_threshold_reasons(
+        state,
+        max_consecutive_local_updates=20,
+        max_cumulative_edge_change_ratio=0.10,
+        max_cumulative_membership_churn=0.10,
+        max_modularity_drop=0.01,
+    ) == (
+        "consecutive_local_updates",
+        "cumulative_edge_change_ratio",
+        "cumulative_membership_churn",
+        "modularity_drop",
+    )
+
+
+def test_drift_state_round_trip_preserves_persistent_values():
+    state = CommunityDriftState(
+        consecutive_local_updates=3,
+        cumulative_edge_change_ratio=0.04,
+        cumulative_membership_churn=0.02,
+        baseline_modularity=0.45,
+        current_modularity=0.44,
+        modularity_drop=0.022,
+    )
+    assert CommunityDriftState.from_dict(state.to_dict()) == state
+
+
+def test_relative_modularity_drop_is_non_negative():
+    assert relative_modularity_drop(0.5, 0.495) == pytest.approx(0.01)
+    assert relative_modularity_drop(0.5, 0.51) == pytest.approx(0.0)
+    assert relative_modularity_drop(None, 0.4) == pytest.approx(0.0)
+
+
+def test_root_membership_churn_counts_only_existing_members():
+    old = pd.DataFrame([
+        _community_row(10, 0, ["a", "b"], "old-10"),
+        _community_row(20, 0, ["c", "d"], "old-20"),
+    ])
+    new = pd.DataFrame([
+        _community_row(10, 0, ["a", "b", "c"], "new-10"),
+        _community_row(20, 0, ["d", "e"], "new-20"),
+    ])
+    assert root_membership_churn(old, new) == pytest.approx(0.25)

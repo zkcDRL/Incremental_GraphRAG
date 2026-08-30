@@ -77,6 +77,10 @@ update:
   local_community_ratio: 0.05
   cold_start_edge_ratio: 0.10
   community_hops: 1
+  max_consecutive_local_updates: 20
+  max_cumulative_edge_change_ratio: 0.10
+  max_cumulative_membership_churn: 0.10
+  max_modularity_drop: 0.01
 
 ### Workflow settings ###
 

@@ -13,6 +13,8 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
+from graphrag.graphs.modularity import modularity
+
 
 class CommunityUpdateStrategy(StrEnum):
     """Available incremental community clustering strategies."""
@@ -42,6 +44,50 @@ class CommunityUpdateResult:
     communities: pd.DataFrame
     metrics: CommunityUpdateMetrics
     changed_community_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CommunityDriftState:
+    """Persistent drift accumulated since the last accepted global clustering."""
+
+    consecutive_local_updates: int = 0
+    cumulative_edge_change_ratio: float = 0.0
+    cumulative_membership_churn: float = 0.0
+    baseline_modularity: float | None = None
+    current_modularity: float | None = None
+    modularity_drop: float = 0.0
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any] | None) -> CommunityDriftState:
+        """Load drift state from the persisted pipeline context."""
+        value = value or {}
+        return cls(
+            consecutive_local_updates=int(value.get("consecutive_local_updates", 0)),
+            cumulative_edge_change_ratio=float(
+                value.get("cumulative_edge_change_ratio", 0.0)
+            ),
+            cumulative_membership_churn=float(
+                value.get("cumulative_membership_churn", 0.0)
+            ),
+            baseline_modularity=_optional_float(value.get("baseline_modularity")),
+            current_modularity=_optional_float(value.get("current_modularity")),
+            modularity_drop=float(value.get("modularity_drop", 0.0)),
+        )
+
+    def to_dict(self) -> dict[str, int | float | None]:
+        """Serialize drift state into the pipeline context."""
+        return {
+            "consecutive_local_updates": self.consecutive_local_updates,
+            "cumulative_edge_change_ratio": self.cumulative_edge_change_ratio,
+            "cumulative_membership_churn": self.cumulative_membership_churn,
+            "baseline_modularity": self.baseline_modularity,
+            "current_modularity": self.current_modularity,
+            "modularity_drop": self.modularity_drop,
+        }
+
+
+def _optional_float(value: Any) -> float | None:
+    return None if value is None else float(value)
 
 
 def _edge_key(row: pd.Series) -> tuple[str, str]:
@@ -246,6 +292,94 @@ def _changed_community_ids(
         ):
             changed.add(community_id)
     return tuple(sorted(changed))
+
+
+def root_membership_churn(
+    old_communities: pd.DataFrame,
+    new_communities: pd.DataFrame,
+) -> float:
+    """Return the fraction of old root-level entity memberships that changed."""
+    old_roots = old_communities[old_communities["level"].astype(int) == 0]
+    new_roots = new_communities[new_communities["level"].astype(int) == 0]
+    old_membership = {
+        str(entity_id): int(row["community"])
+        for _, row in old_roots.iterrows()
+        for entity_id in row["entity_ids"]
+    }
+    new_membership = {
+        str(entity_id): int(row["community"])
+        for _, row in new_roots.iterrows()
+        for entity_id in row["entity_ids"]
+    }
+    if not old_membership:
+        return 0.0
+    changed = sum(
+        new_membership.get(entity_id) != community_id
+        for entity_id, community_id in old_membership.items()
+    )
+    return changed / len(old_membership)
+
+
+def root_partition(
+    communities: pd.DataFrame, entities: pd.DataFrame
+) -> dict[str, int]:
+    """Build a title-to-root-community partition accepted by modularity()."""
+    title_by_id = dict(
+        zip(entities["id"].astype(str), entities["title"].astype(str), strict=False)
+    )
+    roots = communities[communities["level"].astype(int) == 0]
+    return {
+        title_by_id[str(entity_id)]: int(row["community"])
+        for _, row in roots.iterrows()
+        for entity_id in row["entity_ids"]
+        if str(entity_id) in title_by_id
+    }
+
+
+def community_modularity(
+    relationships: pd.DataFrame,
+    communities: pd.DataFrame,
+    entities: pd.DataFrame,
+) -> float:
+    """Calculate root-level modularity for an existing community table."""
+    partition = root_partition(communities, entities)
+    edge_nodes = set(relationships["source"].astype(str)) | set(
+        relationships["target"].astype(str)
+    )
+    missing = edge_nodes - partition.keys()
+    next_id = max(partition.values(), default=-1) + 1
+    for title in sorted(missing):
+        partition[title] = next_id
+        next_id += 1
+    return modularity(relationships, partition) if partition else 0.0
+
+
+def relative_modularity_drop(baseline: float | None, current: float) -> float:
+    """Calculate non-negative modularity loss relative to a baseline."""
+    if baseline is None or abs(baseline) < 1e-12:
+        return 0.0
+    return max(0.0, (baseline - current) / abs(baseline))
+
+
+def drift_threshold_reasons(
+    state: CommunityDriftState,
+    *,
+    max_consecutive_local_updates: int,
+    max_cumulative_edge_change_ratio: float,
+    max_cumulative_membership_churn: float,
+    max_modularity_drop: float,
+) -> tuple[str, ...]:
+    """Return all cumulative drift thresholds reached by a local update."""
+    reasons: list[str] = []
+    if state.consecutive_local_updates >= max_consecutive_local_updates:
+        reasons.append("consecutive_local_updates")
+    if state.cumulative_edge_change_ratio >= max_cumulative_edge_change_ratio:
+        reasons.append("cumulative_edge_change_ratio")
+    if state.cumulative_membership_churn >= max_cumulative_membership_churn:
+        reasons.append("cumulative_membership_churn")
+    if state.modularity_drop >= max_modularity_drop:
+        reasons.append("modularity_drop")
+    return tuple(reasons)
 
 
 def update_communities_adaptively(
