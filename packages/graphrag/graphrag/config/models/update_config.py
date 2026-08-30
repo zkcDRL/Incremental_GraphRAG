@@ -14,6 +14,10 @@ class UpdateConfig(BaseModel):
         ge=1,
         description="保留最近的增量索引快照轮数。",
     )
+    adaptive_community_update: bool = Field(
+        default=True,
+        description="是否启用局部、seeded 和漂移检测组成的自适应社区更新;关闭时增量更新始终执行全图冷启动 Leiden。",
+    )
     local_edge_ratio: float = Field(
         default=0.01,
         ge=0,

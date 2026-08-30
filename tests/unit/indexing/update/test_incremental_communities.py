@@ -68,6 +68,20 @@ def test_selects_cold_above_ten_percent():
     )
 
 
+def test_disabled_adaptive_update_always_selects_cold_start():
+    assert (
+        select_strategy(
+            0.001,
+            0.001,
+            local_edge_ratio=0.01,
+            local_community_ratio=0.05,
+            cold_start_edge_ratio=0.10,
+            adaptive_update_enabled=False,
+        )
+        == CommunityUpdateStrategy.GLOBAL_COLD
+    )
+
+
 def test_changed_edges_detect_additions_and_evidence_changes():
     old = pd.DataFrame([
         {

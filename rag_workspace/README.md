@@ -38,6 +38,17 @@ docker-compose -f docker-compose.neo4j.yml up -d
 
 第一次运行需要从 Docker Hub 下载 `neo4j:5-community`。如果下载超时，请配置 Docker 镜像加速或网络代理后重试。
 
+## 社区更新模式
+
+在 `settings.yaml` 中可以切换增量社区策略：
+
+```yaml
+update:
+  adaptive_community_update: true  # 局部 / seeded / 漂移回退
+```
+
+设置为 `false` 后，`standard-update` 仍只增量抽取新文档，但社区聚类阶段每次都执行全图冷启动 Leiden，适合作为性能对照组。
+
 ## 命令
 
 在仓库根目录 `/home/zkc/Incremental_GraphRAG` 执行：

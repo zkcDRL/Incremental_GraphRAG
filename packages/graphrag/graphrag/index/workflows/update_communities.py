@@ -57,6 +57,7 @@ async def run_workflow(
         local_community_ratio=config.update.local_community_ratio,
         cold_start_edge_ratio=config.update.cold_start_edge_ratio,
         community_hops=config.update.community_hops,
+        adaptive_update_enabled=config.update.adaptive_community_update,
     )
     result, drift_state, drift_reasons = _apply_drift_policy(
         result,

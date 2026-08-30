@@ -327,6 +327,7 @@ class UpdateDefaults:
     """Default values for incremental indexing."""
 
     snapshot_retention_count: int = 7
+    adaptive_community_update: bool = True
     local_edge_ratio: float = 0.01
     local_community_ratio: float = 0.05
     cold_start_edge_ratio: float = 0.10

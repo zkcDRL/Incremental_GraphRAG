@@ -135,8 +135,11 @@ def select_strategy(
     local_edge_ratio: float,
     local_community_ratio: float,
     cold_start_edge_ratio: float,
+    adaptive_update_enabled: bool = True,
 ) -> CommunityUpdateStrategy:
-    """Select local, warm-started global, or cold global clustering."""
+    """Select adaptive clustering, or cold global clustering when disabled."""
+    if not adaptive_update_enabled:
+        return CommunityUpdateStrategy.GLOBAL_COLD
     if (
         affected_edge_ratio < local_edge_ratio
         and affected_community_ratio < local_community_ratio
@@ -396,8 +399,9 @@ def update_communities_adaptively(
     local_community_ratio: float,
     cold_start_edge_ratio: float,
     community_hops: int,
+    adaptive_update_enabled: bool = True,
 ) -> CommunityUpdateResult:
-    """Apply the configured adaptive clustering strategy."""
+    """Apply adaptive clustering, or force a cold global run when disabled."""
     from graphrag.index.workflows.create_communities import build_communities_dataframe
 
     changed_edges = changed_edge_keys(old_relationships, merged_relationships)
@@ -428,6 +432,7 @@ def update_communities_adaptively(
             local_edge_ratio=local_edge_ratio,
             local_community_ratio=local_community_ratio,
             cold_start_edge_ratio=cold_start_edge_ratio,
+            adaptive_update_enabled=adaptive_update_enabled,
         )
         expanded_ids = _expand_communities(
             direct_ids, merged_relationships, title_to_root, community_hops

@@ -30,10 +30,14 @@ def test_update_snapshot_retention_config() -> None:
     config = GraphRagConfig(
         completion_models=DEFAULT_COMPLETION_MODELS,  # type: ignore
         embedding_models=DEFAULT_EMBEDDING_MODELS,  # type: ignore
-        update={"snapshot_retention_count": 3},
+        update={
+            "snapshot_retention_count": 3,
+            "adaptive_community_update": False,
+        },
     )
 
     assert config.update.snapshot_retention_count == 3
+    assert config.update.adaptive_community_update is False
 
 
 @mock.patch.dict(os.environ, {"CUSTOM_API_KEY": FAKE_API_KEY}, clear=True)
