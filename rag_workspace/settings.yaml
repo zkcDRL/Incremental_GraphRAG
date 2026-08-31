@@ -9,6 +9,7 @@ completion_models:
     model_provider: openai
     model: deepseek-v4-flash
     api_base: ${GRAPHRAG_COMPLETION_API_BASE}
+    force_sse: true
     auth_method: api_key
     api_key: ${GRAPHRAG_COMPLETION_API_KEY}
     call_args:

@@ -28,7 +28,7 @@ def test_completion(config) -> None:
             {"role": "user", "content": "Connectivity test"},
         ],
         temperature=0,
-        max_completion_tokens=16,
+        max_completion_tokens=256,
     )
     text = gather_completion_response(response).strip()
     if not text:

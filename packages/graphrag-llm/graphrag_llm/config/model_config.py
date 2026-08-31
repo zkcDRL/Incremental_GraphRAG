@@ -50,6 +50,11 @@ class ModelConfig(BaseModel):
         description="The version of the API to use.",
     )
 
+    force_sse: bool = Field(
+        default=False,
+        description="Force logical non-streaming completions through SSE and aggregate chunks into one response.",
+    )
+
     api_key: str | None = Field(
         default=None,
         description="API key for authentication with the model provider.",

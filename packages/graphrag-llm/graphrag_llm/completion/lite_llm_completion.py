@@ -3,7 +3,7 @@
 
 """LLMCompletion based on litellm."""
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import TYPE_CHECKING, Any, Unpack
 
 import litellm
@@ -17,6 +17,7 @@ from graphrag_llm.middleware import (
 )
 from graphrag_llm.types import LLMCompletionChunk, LLMCompletionResponse
 from graphrag_llm.utils import (
+    create_completion_response,
     structure_completion_response,
 )
 
@@ -128,6 +129,13 @@ class LiteLLMCompletion(LLMCompletion):
             rate_limiter=self._rate_limiter,
             retrier=self._retrier,
         )
+
+        if model_config.force_sse:
+            sse_sync, sse_async = _with_sse_aggregation(
+                self._completion, self._completion_async
+            )
+            self._completion = sse_sync  # type: ignore[assignment]
+            self._completion_async = sse_async  # type: ignore[assignment]
 
     def completion(
         self,
@@ -301,3 +309,39 @@ def _create_base_completions(
         return _run_iterator()
 
     return (_base_completion, _base_completion_async)
+
+
+def _with_sse_aggregation(
+    sync_completion: Callable[..., Any],
+    async_completion: Callable[..., Any],
+) -> tuple[Callable[..., Any], Callable[..., Any]]:
+    """Force non-streaming calls through SSE while preserving the public contract."""
+
+    def _sync(**kwargs: Any):
+        if kwargs.get("stream"):
+            return sync_completion(**kwargs)
+        response = sync_completion(**{**kwargs, "stream": True})
+        if isinstance(response, Iterator):
+            content = "".join(_chunk_content(chunk) for chunk in response)
+            return create_completion_response(content)
+        return response
+
+    async def _async(**kwargs: Any):
+        if kwargs.get("stream"):
+            return await async_completion(**kwargs)
+        response = await async_completion(**{**kwargs, "stream": True})
+        if isinstance(response, AsyncIterator):
+            content = ""
+            async for chunk in response:
+                content += _chunk_content(chunk)
+            return create_completion_response(content)
+        return response
+
+    return _sync, _async
+
+
+def _chunk_content(chunk: LLMCompletionChunk) -> str:
+    """Read visible content from an SSE chunk, safely ignoring usage-only chunks."""
+    if not chunk.choices:
+        return ""
+    return chunk.choices[0].delta.content or ""
