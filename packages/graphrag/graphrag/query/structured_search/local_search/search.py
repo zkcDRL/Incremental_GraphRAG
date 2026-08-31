@@ -147,6 +147,7 @@ class LocalSearch(BaseSearch[LocalContextBuilder]):
         self,
         query: str,
         conversation_history: ConversationHistory | None = None,
+        metrics: dict[str, int | float] | None = None,
     ) -> AsyncGenerator:
         """Build local search context that fits a single context window and generate answer for the user query."""
         start_time = time.time()
@@ -173,6 +174,7 @@ class LocalSearch(BaseSearch[LocalContextBuilder]):
         response: AsyncIterator[LLMCompletionChunk] = await self.model.completion_async(
             messages=messages_builder.build(),
             stream=True,
+            metrics=metrics,
             **self.model_params,
         )  # type: ignore
 

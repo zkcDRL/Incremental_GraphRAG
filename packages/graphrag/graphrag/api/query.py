@@ -204,6 +204,7 @@ async def local_search(
     graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
     vector_store_version: str | None = None,
     verbose: bool = False,
+    metrics: dict[str, Any] | None = None,
 ) -> tuple[
     str | dict[str, Any] | list[dict[str, Any]],
     str | list[pd.DataFrame] | dict[str, pd.DataFrame],
@@ -254,6 +255,7 @@ async def local_search(
         callbacks=callbacks,
         graph_context_loader=graph_context_loader,
         vector_store_version=vector_store_version,
+        metrics=metrics,
     ):
         full_response += chunk
     logger.debug("Query response: %s", truncate(full_response, 400))
@@ -276,6 +278,7 @@ def local_search_streaming(
     graph_context_loader: Callable[[list[str]], dict[str, pd.DataFrame]] | None = None,
     vector_store_version: str | None = None,
     verbose: bool = False,
+    metrics: dict[str, Any] | None = None,
 ) -> AsyncGenerator:
     """Perform a local search and return the context data and response via a generator.
 
@@ -339,7 +342,7 @@ def local_search_streaming(
         callbacks=callbacks,
         graph_context_loader=graph_context_loader,
     )
-    return search_engine.stream_search(query=query)
+    return search_engine.stream_search(query=query, metrics=metrics)
 
 
 @validate_call(config={"arbitrary_types_allowed": True})

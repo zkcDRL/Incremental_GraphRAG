@@ -74,3 +74,9 @@ packages/graphrag-*/example_notebooks/**/cache
 graphrag-test/
 
 MS_GraphRAG社区局部更新需求文档.md
+
+# Local benchmark datasets and runtime workspace
+GraphRAG-Bench/
+GraphRAG-Bench-incremental-101/
+rag_workspace/
+docs/

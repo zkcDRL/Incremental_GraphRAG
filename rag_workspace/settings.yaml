@@ -7,23 +7,22 @@
 completion_models:
   default_completion_model:
     model_provider: openai
-    model: qwen3.7-flash-2026-07-15
-    api_base: https://ws-cx09k4j9b45romk1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
-    auth_method: api_key # or azure_managed_identity
-    api_key: ${GRAPHRAG_API_KEY} # set this in the generated .env file, or remove if managed identity
+    model: deepseek-v4-flash
+    api_base: ${GRAPHRAG_COMPLETION_API_BASE}
+    auth_method: api_key
+    api_key: ${GRAPHRAG_COMPLETION_API_KEY}
     call_args:
       extra_body:
         enable_thinking: false
     retry:
       type: exponential_backoff
-
 embedding_models:
   default_embedding_model:
     model_provider: openai
     model: qwen3.7-text-embedding
-    api_base: https://ws-cx09k4j9b45romk1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+    api_base: ${GRAPHRAG_EMBEDDING_API_BASE}
     auth_method: api_key
-    api_key: ${GRAPHRAG_API_KEY}
+    api_key: ${GRAPHRAG_EMBEDDING_API_KEY}
     retry:
       type: exponential_backoff
 

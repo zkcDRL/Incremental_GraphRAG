@@ -89,6 +89,18 @@ async def run_workflow(
     }
     context.state["community_drift_state"] = drift_state.to_dict()
     context.state["incremental_update_drift_trigger_reasons"] = list(drift_reasons)
+    history = context.state.setdefault("community_update_history", [])
+    history.append({
+        "update_timestamp": context.state["update_timestamp"],
+        "strategy": metrics.strategy.value,
+        "changed_edge_count": metrics.changed_edge_count,
+        "edge_union_count": metrics.edge_union_count,
+        "affected_edge_ratio": metrics.affected_edge_ratio,
+        "affected_community_ratio": metrics.affected_community_ratio,
+        "changed_community_count": len(result.changed_community_ids),
+        "drift_trigger_reasons": list(drift_reasons),
+        **drift_state.to_dict(),
+    })
 
     logger.info(
         "Community strategy=%s changed_edges=%d/%d (%.4f) affected_communities=%.4f",
