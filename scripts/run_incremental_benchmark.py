@@ -22,9 +22,11 @@ from typing import Any
 import pandas as pd
 from graphrag.api.index import build_index
 from graphrag.api.query import local_search
+from graphrag.callbacks.noop_query_callbacks import NoopQueryCallbacks
 from graphrag.config.enums import IndexingMethod
 from graphrag.config.load_config import load_config
 from graphrag.data_model.data_reader import DataReader
+from graphrag.index.workflows.factory import PipelineFactory
 from graphrag_llm.config.metrics_config import MetricsConfig
 from graphrag_storage import create_storage
 from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
@@ -37,26 +39,167 @@ STAGES = (
     (
         "01_base",
         "textbooks/01_base/compact/03_neighbor_records_pm2_851.jsonl",
-        "questions/01_base_single_40.jsonl",
+        ("questions/01_base_single_40.jsonl",),
     ),
     (
         "02_increment_single",
         "textbooks/02_increment_single/all_chunks.jsonl",
-        "questions/02_increment_single_41.jsonl",
+        (
+            "questions/01_base_single_40.jsonl",
+            "questions/02_increment_single_41.jsonl",
+        ),
     ),
     (
         "03_increment_multi",
         "textbooks/03_increment_multi/all_chunks.jsonl",
-        "questions/03_increment_multi_20.jsonl",
+        ("questions/03_increment_multi_20.jsonl",),
     ),
 )
 OBJECTIVE_TYPES = {"FB", "MC", "MS", "TF"}
+BASE_WORKFLOWS = (
+    "create_base_text_units",
+    "create_final_documents",
+    "extract_graph",
+    "finalize_graph",
+    "extract_covariates",
+    "create_communities",
+    "create_final_text_units",
+    "create_community_reports",
+    "generate_text_embeddings",
+)
+
+
+def load_json(path: Path, default: Any = None) -> Any:
+    """Read JSON when present, otherwise return the supplied default."""
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+
+
+def successful_result(path: Path) -> bool:
+    """Return whether a worker artifact exists and records no errors."""
+    value = load_json(path)
+    return isinstance(value, dict) and not value.get("errors")
+
+
+def successful_embedding_recovery(
+    path: Path, namespace: str, vector_store: Path
+) -> dict[str, Any] | None:
+    """Validate an embedding-only recovery as a completed base index."""
+    value = load_json(path)
+    if not isinstance(value, dict):
+        return None
+    if (
+        value.get("stage") != "01_base"
+        or value.get("workflow") != "generate_text_embeddings"
+        or value.get("namespace") != namespace
+        or value.get("errors")
+    ):
+        return None
+    recorded_store = Path(str(value.get("vector_store", ""))).resolve()
+    if recorded_store != vector_store.resolve():
+        return None
+    return value
+
+
+def recovered_base_index_metrics(
+    *,
+    recovery: dict[str, Any],
+    corpus: Path,
+    stats_path: Path,
+) -> dict[str, Any]:
+    """Create benchmark index metadata for a base index recovered outside the worker."""
+    stats = load_json(stats_path, {}) or {}
+    return {
+        "stage": "01_base",
+        "kind": "full_build_recovered",
+        "corpus": str(corpus),
+        "document_count": document_count(corpus),
+        "wall_time_seconds": None,
+        "process_peak_rss_bytes": None,
+        "max_workflow_peak_memory_bytes": max(
+            (
+                item.get("peak_memory_bytes", 0)
+                for item in stats.get("workflows", {}).values()
+            ),
+            default=0,
+        ),
+        "workflow_metrics": stats.get("workflows", {}),
+        "pipeline_stats": stats,
+        "community_drift_state": None,
+        "community_update": None,
+        "recovered_from_existing_neo4j": True,
+        "embedding_recovery": recovery,
+        "errors": [],
+    }
+
+
+def merge_pipeline_stats(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """Preserve workflow metrics collected before a resumed pipeline run."""
+    if not previous:
+        return current
+    merged = {**previous, **current}
+    merged["workflows"] = {
+        **previous.get("workflows", {}),
+        **current.get("workflows", {}),
+    }
+    merged["total_runtime"] = previous.get("total_runtime", 0) + current.get(
+        "total_runtime", 0
+    )
+    return merged
+
+
+def resumed_workflows(workflows: list[str] | tuple[str, ...], start: str) -> list[str]:
+    """Return a workflow suffix beginning at the requested resume point."""
+    workflow_list = list(workflows)
+    try:
+        start_index = workflow_list.index(start)
+    except ValueError as error:
+        msg = f"Unknown workflow {start!r}; choose from {workflow_list}"
+        raise ValueError(msg) from error
+    return workflow_list[start_index:]
+
+
+def next_base_workflow(stats_path: Path) -> str:
+    """Find the first unfinished base workflow, retrying the last if all were recorded."""
+    completed = set((load_json(stats_path, {}) or {}).get("workflows", {}))
+    return next(
+        (workflow for workflow in BASE_WORKFLOWS if workflow not in completed),
+        BASE_WORKFLOWS[-1],
+    )
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a UTF-8 JSON Lines file."""
     with path.open(encoding="utf-8") as file:
         return [json.loads(line) for line in file if line.strip()]
+
+
+def read_stage_questions(dataset: Path, question_paths: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Read and combine a stage's question sets, rejecting duplicate IDs."""
+    rows = [row for path in question_paths for row in read_jsonl(dataset / path)]
+    qids = [str(row["qid"]) for row in rows]
+    if len(qids) != len(set(qids)):
+        duplicates = sorted(qid for qid in set(qids) if qids.count(qid) > 1)
+        msg = f"Duplicate question IDs in stage question sets: {', '.join(duplicates)}"
+        raise ValueError(msg)
+    return rows
+
+
+def stage_queries_complete(
+    answers_path: Path,
+    summary_path: Path,
+    expected_questions: list[dict[str, Any]],
+) -> bool:
+    """Return whether saved answers exactly cover the stage's current question sets."""
+    if not answers_path.exists() or not summary_path.exists():
+        return False
+    answers = read_jsonl(answers_path)
+    expected_qids = [str(row["qid"]) for row in expected_questions]
+    answer_qids = [str(row.get("qid")) for row in answers]
+    summary = load_json(summary_path, {}) or {}
+    return (
+        answer_qids == expected_qids
+        and summary.get("question_count") == len(expected_questions)
+    )
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -207,6 +350,44 @@ def score_objective(item: dict[str, Any], response: str) -> bool:
     return normalized == gold_normalized or gold_normalized in normalized
 
 
+class QueryTimingCallbacks(NoopQueryCallbacks):
+    """Capture query phase boundaries without crossing Pydantic-copied dictionaries."""
+
+    def __init__(self) -> None:
+        self.started_at = time.perf_counter()
+        self.context_completed_at: float | None = None
+        self.first_token_at: float | None = None
+        self.completed_at: float | None = None
+        self.output_chunks = 0
+
+    def on_context(self, context: Any) -> None:
+        """Record when retrieval and context construction have completed."""
+        self.context_completed_at = time.perf_counter()
+
+    def on_llm_new_token(self, token: Any) -> None:
+        """Record first-token latency and streamed chunk count."""
+        now = time.perf_counter()
+        if self.first_token_at is None:
+            self.first_token_at = now
+        self.completed_at = now
+        self.output_chunks += 1
+
+    def finish(self) -> dict[str, int | float]:
+        """Return timing metrics based on callback-observed phase boundaries."""
+        finished_at = time.perf_counter()
+        context_at = self.context_completed_at or finished_at
+        first_token_at = self.first_token_at or finished_at
+        stream_end_at = self.completed_at or finished_at
+        return {
+            "context_build_seconds": context_at - self.started_at,
+            "llm_time_to_first_token_seconds": first_token_at - context_at,
+            "llm_stream_seconds": max(0.0, stream_end_at - first_token_at),
+            "llm_total_seconds": max(0.0, stream_end_at - context_at),
+            "local_search_total_seconds": finished_at - self.started_at,
+            "output_chunks": self.output_chunks,
+        }
+
+
 async def active_provider(config):
     """Create the query-visible provider, resolving the active Neo4j version."""
     provider = create_table_provider(
@@ -223,18 +404,30 @@ async def index_worker(args: argparse.Namespace) -> int:
     metrics_dir = run_dir / "metrics" / args.stage / "index"
     config = configure_run(workspace, run_dir, args.namespace, metrics_dir)
     corpus = Path(args.corpus)
+    stats_path = run_dir / "output" / "stats.json"
+    previous_stats = load_json(stats_path, {}) or {}
+    if args.start_workflow:
+        workflows = list(
+            BASE_WORKFLOWS
+            if not args.update
+            else PipelineFactory.pipelines[IndexingMethod.StandardUpdate]
+        )
+        config.workflows = resumed_workflows(workflows, args.start_workflow)
+
     started = time.perf_counter()
     results = await build_index(
         config,
         method=IndexingMethod.Standard,
         is_update_run=args.update,
-        input_documents=documents_dataframe(corpus),
+        input_documents=None if args.start_workflow else documents_dataframe(corpus),
         verbose=False,
     )
     elapsed = time.perf_counter() - started
     errors = [str(result.error) for result in results if result.error is not None]
-    stats_path = run_dir / "output" / "stats.json"
-    stats = json.loads(stats_path.read_text(encoding="utf-8")) if stats_path.exists() else {}
+    current_stats = load_json(stats_path, {}) or {}
+    stats = merge_pipeline_stats(previous_stats, current_stats)
+    if args.start_workflow and not errors:
+        write_json(stats_path, stats)
     context_path = run_dir / "output" / "context.json"
     context = (
         json.loads(context_path.read_text(encoding="utf-8"))
@@ -264,6 +457,8 @@ async def index_worker(args: argparse.Namespace) -> int:
 async def query_worker(args: argparse.Namespace) -> int:
     """Run one stage's Local Search questions and save answers/context evidence."""
     workspace, run_dir = Path(args.workspace), Path(args.run_dir)
+    result_path = Path(args.result)
+    summary_path = Path(args.summary)
     metrics_dir = run_dir / "metrics" / args.stage / "query"
     config = configure_run(workspace, run_dir, args.namespace, metrics_dir)
     provider = await active_provider(config)
@@ -286,11 +481,42 @@ async def query_worker(args: argparse.Namespace) -> int:
         relationships = await reader.relationships()
         covariates = await reader.covariates() if await provider.has("covariates") else None
 
+    questions = read_stage_questions(Path(args.dataset), tuple(args.question_files))
     rows: list[dict[str, Any]] = []
+    write_jsonl(result_path, rows)
+    write_json(summary_path, {
+        "stage": args.stage,
+        "status": "running",
+        "question_count": 0,
+        "expected_question_count": len(questions),
+        "current_qid": None,
+        "process_peak_rss_bytes": peak_rss_bytes(),
+    })
+    print(
+        f"Starting Local Search evaluation for {args.stage}: "
+        f"{len(questions)} questions",
+        flush=True,
+    )
     try:
-        for item in read_jsonl(Path(args.questions)):
+        for question_number, item in enumerate(questions, start=1):
+            qid = str(item["qid"])
+            print(
+                f"[{args.stage}] question {question_number}/{len(questions)} "
+                f"started: {qid}",
+                flush=True,
+            )
+            write_json(summary_path, {
+                "stage": args.stage,
+                "status": "running",
+                "question_count": len(rows),
+                "expected_question_count": len(questions),
+                "current_question_number": question_number,
+                "current_qid": qid,
+                "process_peak_rss_bytes": peak_rss_bytes(),
+            })
             started = time.perf_counter()
             request_metrics: dict[str, Any] = {}
+            timing_callbacks = QueryTimingCallbacks()
             response_value, context = await local_search(
                 config=config,
                 entities=entities,
@@ -305,8 +531,10 @@ async def query_worker(args: argparse.Namespace) -> int:
                 graph_context_loader=graph_loader,
                 vector_store_version=vector_version,
                 metrics=request_metrics,
+                callbacks=[timing_callbacks],
             )
             latency = time.perf_counter() - started
+            request_metrics.update(timing_callbacks.finish())
             response = (
                 response_value
                 if isinstance(response_value, str)
@@ -335,28 +563,90 @@ async def query_worker(args: argparse.Namespace) -> int:
                 ),
                 "context": json_safe(context),
             })
+            context_seconds = float(request_metrics.get("context_build_seconds", 0))
+            llm_seconds = float(request_metrics.get("llm_total_seconds", 0))
+            overhead_seconds = max(0.0, latency - context_seconds - llm_seconds)
+            request_metrics["benchmark_total_seconds"] = latency
+            request_metrics["benchmark_overhead_seconds"] = overhead_seconds
+            write_jsonl(result_path, rows)
+            print(
+                f"[{args.stage}] question {question_number}/{len(questions)} "
+                f"completed: {qid} ({latency:.2f}s total; "
+                f"context={context_seconds:.2f}s, llm={llm_seconds:.2f}s, "
+                f"other={overhead_seconds:.2f}s)",
+                flush=True,
+            )
+            write_json(summary_path, {
+                "stage": args.stage,
+                "status": "running",
+                "question_count": len(rows),
+                "expected_question_count": len(questions),
+                "current_question_number": question_number,
+                "current_qid": None,
+                "last_completed_qid": qid,
+                "last_latency_seconds": latency,
+                "last_context_build_seconds": context_seconds,
+                "last_llm_total_seconds": llm_seconds,
+                "last_llm_time_to_first_token_seconds": request_metrics.get(
+                    "llm_time_to_first_token_seconds"
+                ),
+                "last_llm_stream_seconds": request_metrics.get("llm_stream_seconds"),
+                "last_overhead_seconds": overhead_seconds,
+                "process_peak_rss_bytes": peak_rss_bytes(),
+            })
     finally:
         close = getattr(provider, "close", None)
         if close is not None:
             await close()
-    write_jsonl(Path(args.result), rows)
-    write_json(Path(args.summary), {
+    write_jsonl(result_path, rows)
+    write_json(summary_path, {
         "stage": args.stage,
+        "status": "completed",
         "question_count": len(rows),
+        "expected_question_count": len(questions),
+        "current_qid": None,
         "process_peak_rss_bytes": peak_rss_bytes(),
     })
     return 0
 
 
 def run_worker(command: list[str], result_path: Path) -> None:
-    """Run a measured worker process and fail with its captured logs."""
-    completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
-    result_path.with_suffix(".stdout.log").write_text(completed.stdout, encoding="utf-8")
-    result_path.with_suffix(".stderr.log").write_text(completed.stderr, encoding="utf-8")
-    if completed.returncode:
-        raise RuntimeError(
-            f"Worker failed ({completed.returncode}); see {result_path.with_suffix('.stderr.log')}"
+    """Run a worker while streaming output to the terminal and log files."""
+    stdout_path = result_path.with_suffix(".stdout.log")
+    stderr_path = result_path.with_suffix(".stderr.log")
+    print(f"Starting worker: {' '.join(command[2:])}", flush=True)
+    with stdout_path.open("w", encoding="utf-8") as stdout_log, stderr_path.open(
+        "w", encoding="utf-8"
+    ) as stderr_log:
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
         )
+
+        async def stream(source, log_file, terminal) -> None:
+            while line := await asyncio.to_thread(source.readline):
+                log_file.write(line)
+                log_file.flush()
+                terminal.write(line)
+                terminal.flush()
+
+        async def stream_worker_output() -> None:
+            if process.stdout is None or process.stderr is None:
+                return
+            await asyncio.gather(
+                stream(process.stdout, stdout_log, sys.stdout),
+                stream(process.stderr, stderr_log, sys.stderr),
+            )
+
+        asyncio.run(stream_worker_output())
+        returncode = process.wait()
+    if returncode:
+        msg = f"Worker failed ({returncode}); see {stderr_path}"
+        raise RuntimeError(msg)
 
 
 def aggregate_answers(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -393,60 +683,110 @@ def aggregate_answers(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def orchestrate(args: argparse.Namespace) -> int:
-    """Run all three index/query stages and prepare final scoring artifacts."""
+    """Run selected index/query stages, reusing every successful artifact."""
     dataset, workspace = Path(args.dataset).resolve(), Path(args.workspace).resolve()
     run_dir = Path(args.output).resolve()
-    if run_dir.exists():
-        if not args.overwrite:
-            raise FileExistsError(f"Output already exists: {run_dir}; pass --overwrite")
+    if run_dir.exists() and args.overwrite:
         shutil.rmtree(run_dir)
-    run_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    stage_names = [stage for stage, _, _ in STAGES]
+    start_index = stage_names.index(args.start_stage)
+    stop_index = stage_names.index(args.stop_after_stage)
+    if start_index > stop_index:
+        msg = "--start-stage must not come after --stop-after-stage"
+        raise ValueError(msg)
 
     script = Path(__file__).resolve()
-    all_answers: list[dict[str, Any]] = []
-    stage_summaries = []
-    for index, (stage, corpus_rel, questions_rel) in enumerate(STAGES):
+    for index, (stage, corpus_rel, question_paths) in enumerate(STAGES):
+        if index < start_index or index > stop_index:
+            continue
         stage_dir = run_dir / stage
-        stage_dir.mkdir()
+        stage_dir.mkdir(exist_ok=True)
         index_result = stage_dir / "index_metrics.json"
-        index_command = [
-            sys.executable,
-            str(script),
-            "_index-worker",
-            "--workspace", str(workspace),
-            "--run-dir", str(run_dir),
-            "--namespace", args.namespace,
-            "--stage", stage,
-            "--corpus", str(dataset / corpus_rel),
-            "--result", str(index_result),
-        ]
-        if index:
-            index_command.append("--update")
-        run_worker(index_command, index_result)
+        if index == 0 and not successful_result(index_result):
+            recovery = successful_embedding_recovery(
+                stage_dir / "embedding_recovery.json",
+                args.namespace,
+                run_dir / "lancedb",
+            )
+            if recovery is not None:
+                write_json(
+                    index_result,
+                    recovered_base_index_metrics(
+                        recovery=recovery,
+                        corpus=dataset / corpus_rel,
+                        stats_path=run_dir / "output" / "stats.json",
+                    ),
+                )
+                print(
+                    "Recognized successful embedding recovery; reusing the complete "
+                    "01_base index."
+                )
+        if successful_result(index_result):
+            print(f"Reusing completed index: {stage}")
+        else:
+            index_command = [
+                sys.executable,
+                str(script),
+                "_index-worker",
+                "--workspace", str(workspace),
+                "--run-dir", str(run_dir),
+                "--namespace", args.namespace,
+                "--stage", stage,
+                "--corpus", str(dataset / corpus_rel),
+                "--result", str(index_result),
+            ]
+            if index:
+                index_command.append("--update")
+            elif run_dir.exists() and (run_dir / "output" / "stats.json").exists():
+                start_workflow = next_base_workflow(run_dir / "output" / "stats.json")
+                index_command.extend(["--start-workflow", start_workflow])
+                print(f"Resuming {stage} from workflow: {start_workflow}")
+            run_worker(index_command, index_result)
 
         answers_path = stage_dir / "answers.jsonl"
         query_summary_path = stage_dir / "query_process_metrics.json"
-        run_worker([
-            sys.executable,
-            str(script),
-            "_query-worker",
-            "--workspace", str(workspace),
-            "--run-dir", str(run_dir),
-            "--namespace", args.namespace,
-            "--stage", stage,
-            "--questions", str(dataset / questions_rel),
-            "--result", str(answers_path),
-            "--summary", str(query_summary_path),
-        ], answers_path)
-        answers = read_jsonl(answers_path)
+        expected_questions = read_stage_questions(dataset, question_paths)
+        if stage_queries_complete(answers_path, query_summary_path, expected_questions):
+            print(f"Reusing completed queries: {stage}")
+        else:
+            if answers_path.exists() or query_summary_path.exists():
+                print(
+                    f"Existing query artifacts for {stage} do not cover all "
+                    f"{len(expected_questions)} questions; rerunning queries."
+                )
+            run_worker([
+                sys.executable,
+                str(script),
+                "_query-worker",
+                "--workspace", str(workspace),
+                "--run-dir", str(run_dir),
+                "--namespace", args.namespace,
+                "--stage", stage,
+                "--dataset", str(dataset),
+                "--question-files", *question_paths,
+                "--result", str(answers_path),
+                "--summary", str(query_summary_path),
+            ], answers_path)
+
+    completed_stages = [
+        item for item in STAGES
+        if successful_result(run_dir / item[0] / "index_metrics.json")
+        and (run_dir / item[0] / "answers.jsonl").exists()
+        and (run_dir / item[0] / "query_process_metrics.json").exists()
+    ]
+    all_answers: list[dict[str, Any]] = []
+    stage_summaries = []
+    for stage, _, _ in completed_stages:
+        stage_dir = run_dir / stage
+        answers = read_jsonl(stage_dir / "answers.jsonl")
         all_answers.extend(answers)
-        index_metrics = json.loads(index_result.read_text(encoding="utf-8"))
-        query_process = json.loads(query_summary_path.read_text(encoding="utf-8"))
         stage_summaries.append({
             "stage": stage,
-            "index": index_metrics,
+            "index": load_json(stage_dir / "index_metrics.json", {}),
             "index_llm": collect_token_metrics(run_dir / "metrics" / stage / "index"),
-            "query_process": query_process,
+            "query_process": load_json(stage_dir / "query_process_metrics.json", {}),
             "query_llm": collect_token_metrics(run_dir / "metrics" / stage / "query"),
             "questions_by_type": aggregate_answers(answers),
         })
@@ -523,7 +863,13 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--workspace", default=str(DEFAULT_WORKSPACE))
     run.add_argument("--output", default=str(DEFAULT_WORKSPACE / "benchmark_results" / "incremental-101"))
     run.add_argument("--namespace", default="graphrag-bench-incremental-101")
-    run.add_argument("--overwrite", action="store_true")
+    run.add_argument("--overwrite", action="store_true", help="Delete all prior results and start over")
+    run.add_argument(
+        "--start-stage", choices=[stage for stage, _, _ in STAGES], default=STAGES[0][0]
+    )
+    run.add_argument(
+        "--stop-after-stage", choices=[stage for stage, _, _ in STAGES], default=STAGES[-1][0]
+    )
 
     score = subparsers.add_parser("score-open", help="Apply completed OE judgments")
     score.add_argument("--run-dir", required=True)
@@ -533,10 +879,12 @@ def parser() -> argparse.ArgumentParser:
     for name in ("workspace", "run-dir", "namespace", "stage", "corpus", "result"):
         index.add_argument(f"--{name}", required=True)
     index.add_argument("--update", action="store_true")
+    index.add_argument("--start-workflow")
 
     query = subparsers.add_parser("_query-worker")
-    for name in ("workspace", "run-dir", "namespace", "stage", "questions", "result", "summary"):
+    for name in ("workspace", "run-dir", "namespace", "stage", "dataset", "result", "summary"):
         query.add_argument(f"--{name}", required=True)
+    query.add_argument("--question-files", nargs="+", required=True)
     return result
 
 

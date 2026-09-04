@@ -19,11 +19,15 @@ completion_models:
       type: exponential_backoff
 embedding_models:
   default_embedding_model:
-    model_provider: openai
-    model: qwen3.7-text-embedding
-    api_base: ${GRAPHRAG_EMBEDDING_API_BASE}
+    # Local Ollama embedding service. Start it with scripts/start_ollama_bge_m3.sh.
+    model_provider: ollama
+    model: bge-m3
+    api_base: http://127.0.0.1:11434
+    # GraphRAG's LiteLLM config requires a non-empty key; Ollama ignores it.
     auth_method: api_key
-    api_key: ${GRAPHRAG_EMBEDDING_API_KEY}
+    api_key: ollama
+    call_args:
+      timeout: 120
     retry:
       type: exponential_backoff
 
@@ -77,6 +81,7 @@ cache:
 vector_store:
   type: lancedb
   db_uri: output/lancedb
+  vector_size: 1024
 
 update:
   snapshot_retention_count: 7

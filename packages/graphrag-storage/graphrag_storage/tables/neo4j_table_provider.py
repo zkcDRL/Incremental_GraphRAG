@@ -325,7 +325,71 @@ class Neo4jTableProvider(TableProvider):
                     records=records,
                 )
 
-        await self._refresh_domain_relationships(table_name, df)
+        await self.rebuild_graph_projection()
+
+    async def rebuild_graph_projection(self) -> dict[str, int]:
+        """Rebuild all graph-native edges from the current logical tables.
+
+        Replacing Entity, Relationship, or TextUnit nodes detaches edges created by
+        earlier table writes. Rebuilding in dependency order after every table-level
+        replacement keeps the graph projection consistent regardless of workflow
+        close order.
+        """
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (source:GraphRAGRecord {namespace: $namespace})-[edge]->"
+                "(target:GraphRAGRecord {namespace: $namespace}) DELETE edge",
+                namespace=self._namespace,
+            )
+            await result.consume()
+
+        for table_name in (
+            "relationships",
+            "text_units",
+            "documents",
+            "communities",
+            "community_reports",
+        ):
+            if await self.has(table_name):
+                await self._refresh_domain_relationships(
+                    table_name, await self.read_dataframe(table_name)
+                )
+
+        counts: dict[str, int] = {}
+        async with self._driver.session(database=self._database) as session:
+            for relation in (
+                "RELATED",
+                "MENTIONS",
+                "EVIDENCES",
+                "CONTAINS",
+                "HAS_MEMBER",
+                "INCLUDES_RELATIONSHIP",
+                "CONTAINS_TEXT_UNIT",
+                "REPORTS_ON",
+            ):
+                result = await session.run(
+                    "MATCH (:GraphRAGRecord {namespace: $namespace})"
+                    f"-[edge:{relation}]->() RETURN count(edge) AS count",
+                    namespace=self._namespace,
+                )
+                record = await result.single()
+                counts[relation] = int(record["count"]) if record else 0
+        return counts
+
+    async def clear_namespace_tree(self) -> None:
+        """Delete this namespace and all versioned child namespaces."""
+        await self._ensure_schema()
+        prefix = f"{self._namespace}/"
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (node) WHERE node.namespace = $namespace "
+                "OR node.namespace STARTS WITH $prefix "
+                "DETACH DELETE node",
+                namespace=self._namespace,
+                prefix=prefix,
+            )
+            await result.consume()
 
     def read_local_search_context(
         self, seed_entity_ids: list[str]
@@ -489,7 +553,8 @@ class Neo4jTableProvider(TableProvider):
         if not links:
             return
         async with self._driver.session(database=self._database) as session:
-            await session.run(query, namespace=self._namespace, links=links)
+            result = await session.run(query, namespace=self._namespace, links=links)
+            await result.consume()
 
     async def _link_documents(self, df: pd.DataFrame) -> None:
         links = [
@@ -508,11 +573,19 @@ class Neo4jTableProvider(TableProvider):
     async def _link_text_units(self, df: pd.DataFrame) -> None:
         rows = df.to_dict("records")
         entity_links = [
-            {"source": str(row["id"]), "targets": [str(value) for value in row.get("entity_ids", [])]}
+            {
+                "source": str(row["id"]),
+                "targets": [str(value) for value in (row.get("entity_ids") or [])],
+            }
             for row in rows
         ]
         relationship_links = [
-            {"source": str(row["id"]), "targets": [str(value) for value in row.get("relationship_ids", [])]}
+            {
+                "source": str(row["id"]),
+                "targets": [
+                    str(value) for value in (row.get("relationship_ids") or [])
+                ],
+            }
             for row in rows
         ]
         await self._run_links(
@@ -531,6 +604,29 @@ class Neo4jTableProvider(TableProvider):
             "MERGE (text_unit)-[:EVIDENCES]->(relationship)",
             relationship_links,
         )
+
+        # Older/interrupted indexes can contain pre-finalized TextUnits without
+        # entity_ids/relationship_ids. Entities and Relationships retain the
+        # inverse text_unit_ids references, so use those as a lossless fallback.
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (entity:Entity {namespace: $namespace}) "
+                "WHERE entity.text_unit_ids IS NOT NULL "
+                "UNWIND entity.text_unit_ids AS text_unit_id "
+                "MATCH (text_unit:TextUnit {namespace: $namespace, row_id: text_unit_id}) "
+                "MERGE (text_unit)-[:MENTIONS]->(entity)",
+                namespace=self._namespace,
+            )
+            await result.consume()
+            result = await session.run(
+                "MATCH (relationship:Relationship {namespace: $namespace}) "
+                "WHERE relationship.text_unit_ids IS NOT NULL "
+                "UNWIND relationship.text_unit_ids AS text_unit_id "
+                "MATCH (text_unit:TextUnit {namespace: $namespace, row_id: text_unit_id}) "
+                "MERGE (text_unit)-[:EVIDENCES]->(relationship)",
+                namespace=self._namespace,
+            )
+            await result.consume()
 
     async def _link_entity_relationships(self, df: pd.DataFrame) -> None:
         if "id" not in df.columns:

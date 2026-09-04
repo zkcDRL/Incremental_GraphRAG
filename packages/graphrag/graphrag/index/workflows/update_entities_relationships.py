@@ -112,6 +112,15 @@ async def _update_entities_and_relationships(
         max_input_tokens=config.summarize_descriptions.max_input_tokens,
         summarization_prompt=prompts.summarize_prompt,
         num_threads=config.concurrent_requests,
+        changed_entity_titles=set(delta_entities["title"].astype(str)),
+        changed_relationship_keys={
+            (str(source), str(target))
+            for source, target in zip(
+                delta_relationships["source"],
+                delta_relationships["target"],
+                strict=False,
+            )
+        },
     )
 
     # Save the updated entities back to storage

@@ -55,6 +55,8 @@ async def _update_text_units(
     """Update the text units output."""
     old_text_units = await DataReader(previous_table_provider).text_units()
     delta_text_units = await DataReader(delta_table_provider).text_units()
+    old_text_units = _normalize_reference_columns(old_text_units)
+    delta_text_units = _normalize_reference_columns(delta_text_units)
     merged_text_units = _update_and_merge_text_units(
         old_text_units, delta_text_units, entity_id_mapping
     )
@@ -62,6 +64,17 @@ async def _update_text_units(
     await output_table_provider.write_dataframe("text_units", merged_text_units)
 
     return merged_text_units
+
+
+def _normalize_reference_columns(text_units: pd.DataFrame) -> pd.DataFrame:
+    """Normalize nullable list references from legacy or interrupted indexes."""
+    normalized = text_units.copy()
+    for column in ("entity_ids", "relationship_ids", "covariate_ids"):
+        if column in normalized.columns:
+            normalized[column] = normalized[column].apply(
+                lambda value: value if isinstance(value, (list, tuple)) else []
+            )
+    return normalized
 
 
 def _update_and_merge_text_units(
@@ -91,7 +104,14 @@ def _update_and_merge_text_units(
             lambda x: [entity_id_mapping.get(i, i) for i in x] if x is not None else x
         )
 
-    initial_id = old_text_units["human_readable_id"].max() + 1
+    if "human_readable_id" not in old_text_units.columns:
+        old_text_units = old_text_units.copy()
+        old_text_units["human_readable_id"] = np.arange(len(old_text_units))
+    initial_id = (
+        int(old_text_units["human_readable_id"].max()) + 1
+        if not old_text_units.empty
+        else 0
+    )
     delta_text_units["human_readable_id"] = np.arange(
         initial_id, initial_id + len(delta_text_units)
     )

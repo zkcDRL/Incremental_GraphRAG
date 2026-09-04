@@ -163,11 +163,30 @@ async def get_summarized_entities_relationships(
     max_input_tokens: int,
     summarization_prompt: str,
     num_threads: int,
+    changed_entity_titles: set[str] | None = None,
+    changed_relationship_keys: set[tuple[str, str]] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Summarize the entities and relationships."""
+    """Summarize all rows by default, or only changed rows for an update."""
+    selective = changed_entity_titles is not None or changed_relationship_keys is not None
+    if not selective:
+        entities_to_summarize = extracted_entities
+        relationships_to_summarize = extracted_relationships
+    else:
+        entity_titles = changed_entity_titles or set()
+        relationship_keys = changed_relationship_keys or set()
+        entities_to_summarize = extracted_entities[
+            extracted_entities["title"].astype(str).isin(entity_titles)
+        ]
+        relationships_to_summarize = extracted_relationships[
+            extracted_relationships.apply(
+                lambda row: (str(row["source"]), str(row["target"])) in relationship_keys,
+                axis=1,
+            )
+        ]
+
     entity_summaries, relationship_summaries = await summarize_descriptions(
-        entities_df=extracted_entities,
-        relationships_df=extracted_relationships,
+        entities_df=entities_to_summarize,
+        relationships_df=relationships_to_summarize,
         callbacks=callbacks,
         model=model,
         max_summary_length=max_summary_length,
@@ -176,10 +195,49 @@ async def get_summarized_entities_relationships(
         num_threads=num_threads,
     )
 
-    relationships = extracted_relationships.drop(columns=["description"]).merge(
-        relationship_summaries, on=["source", "target"], how="left"
+    if not selective:
+        relationships = extracted_relationships.drop(columns=["description"]).merge(
+            relationship_summaries, on=["source", "target"], how="left"
+        )
+        entities = extracted_entities.drop(columns=["description"]).merge(
+            entity_summaries, on="title", how="left"
+        )
+        return entities, relationships
+
+    # Rows outside the changed sets retain their existing finalized description.
+    def existing_description(value: object) -> str:
+        if isinstance(value, (list, tuple)):
+            return str(value[0]) if value else ""
+        return "" if value is None else str(value)
+
+    entities = extracted_entities.copy()
+    entity_summary_map = (
+        dict(
+            zip(
+                entity_summaries["title"],
+                entity_summaries["description"],
+                strict=False,
+            )
+        )
+        if "title" in entity_summaries.columns
+        else {}
+    )
+    entities["description"] = entities.apply(
+        lambda row: entity_summary_map.get(
+            row["title"], existing_description(row["description"])
+        ),
+        axis=1,
     )
 
-    extracted_entities.drop(columns=["description"], inplace=True)
-    entities = extracted_entities.merge(entity_summaries, on="title", how="left")
+    relationships = extracted_relationships.copy()
+    relationship_summary_map = {
+        (row["source"], row["target"]): row["description"]
+        for _, row in relationship_summaries.iterrows()
+    }
+    relationships["description"] = relationships.apply(
+        lambda row: relationship_summary_map.get(
+            (row["source"], row["target"]), existing_description(row["description"])
+        ),
+        axis=1,
+    )
     return entities, relationships

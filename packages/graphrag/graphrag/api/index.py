@@ -73,24 +73,37 @@ async def build_index(
 
     workflow_callbacks.pipeline_start(pipeline.names())
 
-    async for output in run_pipeline(
-        pipeline,
-        config,
-        callbacks=workflow_callbacks,
-        is_update_run=is_update_run,
-        additional_context=additional_context,
-        input_documents=input_documents,
-    ):
-        outputs.append(output)
-        if output.error is not None:
-            logger.error("Workflow %s completed with errors", output.workflow)
-            workflow_callbacks.pipeline_error(output.error)
-        else:
-            logger.info("Workflow %s completed successfully", output.workflow)
-        logger.debug(str(output.result))
+    try:
+        async for output in run_pipeline(
+            pipeline,
+            config,
+            callbacks=workflow_callbacks,
+            is_update_run=is_update_run,
+            additional_context=additional_context,
+            input_documents=input_documents,
+        ):
+            outputs.append(output)
+            if output.error is not None:
+                logger.error("Workflow %s completed with errors", output.workflow)
+                workflow_callbacks.pipeline_error(output.error)
+            else:
+                logger.info("Workflow %s completed successfully", output.workflow)
+            logger.debug(str(output.result))
+    finally:
+        await _close_litellm_clients()
 
     workflow_callbacks.pipeline_end(outputs)
     return outputs
+
+
+async def _close_litellm_clients() -> None:
+    """Close LiteLLM's shared async clients after each pipeline run."""
+    try:
+        import litellm
+
+        await litellm.close_litellm_async_clients()
+    except Exception:
+        logger.warning("Failed to close LiteLLM async clients", exc_info=True)
 
 
 def _get_method(method: IndexingMethod | str, is_update_run: bool) -> str:

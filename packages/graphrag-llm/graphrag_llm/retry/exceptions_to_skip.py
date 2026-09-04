@@ -14,9 +14,6 @@ _default_exceptions_to_skip = [
     "PermissionDeniedError",
     "NotFoundError",
     "UnprocessableEntityError",
-    "APIConnectionError",
-    "APIError",
-    "ServiceUnavailableError",
     "APIResponseValidationError",
     "BudgetExceededError",
 ]

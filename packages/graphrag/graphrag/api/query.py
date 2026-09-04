@@ -18,6 +18,7 @@ Backwards compatibility is not guaranteed at this time.
 """
 
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -241,6 +242,7 @@ async def local_search(
     callbacks.append(local_callbacks)
 
     logger.debug("Executing local search query: %s", query)
+    search_started = time.perf_counter()
     async for chunk in local_search_streaming(
         config=config,
         entities=entities,
@@ -258,6 +260,8 @@ async def local_search(
         metrics=metrics,
     ):
         full_response += chunk
+    if metrics is not None:
+        metrics["api_local_search_seconds"] = time.perf_counter() - search_started
     logger.debug("Query response: %s", truncate(full_response, 400))
     return full_response, context_data
 

@@ -133,6 +133,10 @@ async def run_pipeline(
     if is_update_run and not pipeline_failed:
         if version_provider:
             await version_provider.publish_version(update_timestamp)
+        await _persist_update_run_metadata(
+            delta_storage=delta_storage,
+            output_storage=output_storage,
+        )
         await _cleanup_update_snapshots(
             update_storage,
             update_base_provider,
@@ -142,6 +146,18 @@ async def run_pipeline(
         )
     elif is_update_run and version_provider:
         await version_provider.mark_version_failed(update_timestamp)
+
+
+async def _persist_update_run_metadata(
+    *,
+    delta_storage: Storage,
+    output_storage: Storage,
+) -> None:
+    """Persist successful update state and stats for subsequent update runs."""
+    for filename in ("context.json", "stats.json"):
+        value = await delta_storage.get(filename)
+        if value is not None:
+            await output_storage.set(filename, value)
 
 
 async def _run_pipeline(

@@ -132,7 +132,9 @@ class LiteLLMCompletion(LLMCompletion):
 
         if model_config.force_sse:
             sse_sync, sse_async = _with_sse_aggregation(
-                self._completion, self._completion_async
+                self._completion,
+                self._completion_async,
+                retrier=self._retrier,
             )
             self._completion = sse_sync  # type: ignore[assignment]
             self._completion_async = sse_async  # type: ignore[assignment]
@@ -314,21 +316,19 @@ def _create_base_completions(
 def _with_sse_aggregation(
     sync_completion: Callable[..., Any],
     async_completion: Callable[..., Any],
+    *,
+    retrier: "Retry | None" = None,
 ) -> tuple[Callable[..., Any], Callable[..., Any]]:
-    """Force non-streaming calls through SSE while preserving the public contract."""
+    """Force non-streaming calls through SSE and retry mid-stream failures."""
 
-    def _sync(**kwargs: Any):
-        if kwargs.get("stream"):
-            return sync_completion(**kwargs)
+    def _aggregate_sync(**kwargs: Any):
         response = sync_completion(**{**kwargs, "stream": True})
         if isinstance(response, Iterator):
             content = "".join(_chunk_content(chunk) for chunk in response)
             return create_completion_response(content)
         return response
 
-    async def _async(**kwargs: Any):
-        if kwargs.get("stream"):
-            return await async_completion(**kwargs)
+    async def _aggregate_async(**kwargs: Any):
         response = await async_completion(**{**kwargs, "stream": True})
         if isinstance(response, AsyncIterator):
             content = ""
@@ -336,6 +336,20 @@ def _with_sse_aggregation(
                 content += _chunk_content(chunk)
             return create_completion_response(content)
         return response
+
+    def _sync(**kwargs: Any):
+        if kwargs.get("stream"):
+            return sync_completion(**kwargs)
+        if retrier is not None:
+            return retrier.retry(func=_aggregate_sync, input_args=kwargs)
+        return _aggregate_sync(**kwargs)
+
+    async def _async(**kwargs: Any):
+        if kwargs.get("stream"):
+            return await async_completion(**kwargs)
+        if retrier is not None:
+            return await retrier.retry_async(func=_aggregate_async, input_args=kwargs)
+        return await _aggregate_async(**kwargs)
 
     return _sync, _async
 

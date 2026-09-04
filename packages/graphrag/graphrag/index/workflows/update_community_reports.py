@@ -55,7 +55,15 @@ async def run_workflow(
         frontier = parents
 
     existing_report_ids = set(old_reports["community"].astype(int))
-    changed_ids.update(set(parent_by_id) - existing_report_ids)
+    force_full_rebuild = bool(
+        context.state.get("additional_context", {}).get(
+            "force_full_community_rebuild", False
+        )
+    )
+    if force_full_rebuild:
+        changed_ids = set(parent_by_id)
+    else:
+        changed_ids.update(set(parent_by_id) - existing_report_ids)
     if not changed_ids:
         await output_provider.write_dataframe("community_reports", old_reports)
         return WorkflowFunctionOutput(result=old_reports)
