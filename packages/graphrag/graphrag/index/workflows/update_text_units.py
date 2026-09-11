@@ -7,6 +7,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.table_provider import TableProvider
 
 from graphrag.config.models.graph_rag_config import GraphRagConfig
@@ -33,12 +34,32 @@ async def run_workflow(
     )
     entity_id_mapping = context.state["incremental_update_entity_id_mapping"]
 
-    merged_text_units = await _update_text_units(
-        previous_table_provider,
-        delta_table_provider,
-        output_table_provider,
-        entity_id_mapping,
-    )
+    if isinstance(output_table_provider, Neo4jTableProvider) and isinstance(
+        delta_table_provider, Neo4jTableProvider
+    ):
+        merged_text_units = await DataReader(delta_table_provider).text_units()
+        merged_text_units = _normalize_reference_columns(merged_text_units)
+        if entity_id_mapping:
+            merged_text_units["entity_ids"] = merged_text_units["entity_ids"].apply(
+                lambda values: [entity_id_mapping.get(value, value) for value in values]
+            )
+        initial_id = (
+            await output_table_provider.max_numeric_property(
+                "text_units", "human_readable_id"
+            )
+            + 1
+        )
+        merged_text_units["human_readable_id"] = np.arange(
+            initial_id, initial_id + len(merged_text_units)
+        )
+        await output_table_provider.upsert_dataframe("text_units", merged_text_units)
+    else:
+        merged_text_units = await _update_text_units(
+            previous_table_provider,
+            delta_table_provider,
+            output_table_provider,
+            entity_id_mapping,
+        )
 
     context.state["incremental_update_merged_text_units"] = merged_text_units
 

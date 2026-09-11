@@ -7,6 +7,7 @@ from graphrag_cache import Cache
 from graphrag_cache.memory_cache import MemoryCache
 from graphrag_storage import Storage, create_storage
 from graphrag_storage.memory_storage import MemoryStorage
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.parquet_table_provider import ParquetTableProvider
 from graphrag_storage.tables.table_provider import TableProvider
 from graphrag_storage.tables.table_provider_factory import create_table_provider
@@ -74,6 +75,8 @@ def get_update_table_providers(
     # to Storage.child() for filesystem paths.
     update_storage = create_storage(config.update_output_storage)
     update_base_provider = create_table_provider(config.table_provider, update_storage)
+    if isinstance(update_base_provider, Neo4jTableProvider):
+        update_base_provider.defer_graph_projection()
     timestamped_provider = update_base_provider.child(timestamp)
     delta_table_provider = timestamped_provider.child("delta")
     previous_table_provider = timestamped_provider.child("previous")

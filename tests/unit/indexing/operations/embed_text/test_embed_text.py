@@ -188,6 +188,43 @@ async def test_embed_text_batching():
 
 
 @pytest.mark.asyncio
+async def test_embed_text_separates_request_and_vector_write_batches():
+    """Keep model requests small while combining completed vector writes."""
+    rows = [{"id": str(i), "text": f"long report {i}"} for i in range(260)]
+    input_table = FakeInputTable(rows)
+    vector_store = _make_mock_vector_store()
+
+    with patch(
+        "graphrag.index.operations.embed_text.embed_text.run_embed_text",
+        new_callable=AsyncMock,
+    ) as mock_run:
+        mock_run.side_effect = [
+            _make_embedding_result(1, [float(i)]) for i in range(len(rows))
+        ]
+
+        count = await embed_text(
+            input_table=input_table,
+            callbacks=NoopWorkflowCallbacks(),
+            model=MagicMock(),
+            tokenizer=MagicMock(),
+            embed_column="text",
+            batch_size=1,
+            batch_max_tokens=1024,
+            num_threads=1,
+            vector_store=vector_store,
+            vector_write_batch_size=128,
+        )
+
+    assert count == 260
+    assert mock_run.call_count == 260
+    assert all(len(call.args[0]) == 1 for call in mock_run.call_args_list)
+    assert vector_store.load_documents.call_count == 3
+    assert [
+        len(call.args[0]) for call in vector_store.load_documents.call_args_list
+    ] == [128, 128, 4]
+
+
+@pytest.mark.asyncio
 async def test_embed_text_pretransformed_rows():
     """Verify rows pre-transformed by table layer are embedded correctly."""
     rows = [

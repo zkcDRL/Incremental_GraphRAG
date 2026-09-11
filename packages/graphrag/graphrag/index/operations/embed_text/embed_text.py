@@ -32,19 +32,26 @@ async def embed_text(
     vector_store: VectorStore,
     id_column: str = "id",
     output_table: Table | None = None,
+    vector_write_batch_size: int | None = None,
 ) -> int:
     """Embed text from a streaming Table into a vector store.
 
-    Rows are buffered before flushing to ``run_embed_text``,
-    which dispatches API batches concurrently up to
-    ``num_threads``.  The buffer is sized so each flush produces
-    enough batches to saturate the concurrency limit.
+    Input rows are buffered separately from completed vectors. The first
+    buffer controls model request concurrency; ``vector_write_batch_size``
+    controls how many small embedding results are combined per vector-store
+    write. This allows one-at-a-time inference for long inputs without
+    creating one LanceDB commit per vector.
     """
     vector_store.create_index()
 
     buffer: list[dict[str, Any]] = []
+    pending_documents: list[VectorStoreDocument] = []
     total_rows = 0
     flush_size = batch_size * num_threads
+    write_batch_size = vector_write_batch_size or flush_size
+    if write_batch_size < 1:
+        msg = "vector_write_batch_size must be positive"
+        raise ValueError(msg)
 
     async for row in input_table:
         text = row.get(embed_column)
@@ -69,6 +76,8 @@ async def embed_text(
                 num_threads,
                 vector_store,
                 output_table,
+                pending_documents,
+                write_batch_size,
             )
             buffer.clear()
 
@@ -85,7 +94,13 @@ async def embed_text(
             num_threads,
             vector_store,
             output_table,
+            pending_documents,
+            write_batch_size,
         )
+
+    if pending_documents:
+        vector_store.load_documents(list(pending_documents))
+        pending_documents.clear()
 
     return total_rows
 
@@ -102,8 +117,10 @@ async def _flush_embedding_buffer(
     num_threads: int,
     vector_store: VectorStore,
     output_table: Table | None,
+    pending_documents: list[VectorStoreDocument],
+    vector_write_batch_size: int,
 ) -> int:
-    """Embed a buffer of rows and load results into the vector store."""
+    """Embed rows and periodically flush completed vectors to the store."""
     texts: list[str] = [row[embed_column] for row in buffer]
     ids: list[str] = [row[id_column] for row in buffer]
 
@@ -133,7 +150,10 @@ async def _flush_embedding_buffer(
             )
         )
 
-    vector_store.load_documents(documents)
+    pending_documents.extend(documents)
+    if len(pending_documents) >= vector_write_batch_size:
+        vector_store.load_documents(list(pending_documents))
+        pending_documents.clear()
 
     if skipped > 0:
         logger.warning(

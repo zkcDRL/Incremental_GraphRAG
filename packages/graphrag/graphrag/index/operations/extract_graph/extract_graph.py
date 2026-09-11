@@ -82,13 +82,21 @@ async def _run_extract_graph(
     max_gleanings: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the graph intelligence entity extraction strategy."""
+
+    def on_error(error, stack, details):
+        logger.error(
+            "Entity Extraction Error",
+            exc_info=error,
+            extra={"stack": stack, "details": details},
+        )
+        msg = f"Entity extraction failed for text unit {source_id}"
+        raise RuntimeError(msg) from error
+
     extractor = GraphExtractor(
         model=model,
         prompt=prompt,
         max_gleanings=max_gleanings,
-        on_error=lambda e, s, d: logger.error(
-            "Entity Extraction Error", exc_info=e, extra={"stack": s, "details": d}
-        ),
+        on_error=on_error,
     )
     text = text.strip()
 

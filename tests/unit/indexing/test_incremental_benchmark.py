@@ -3,8 +3,14 @@
 
 """Tests for the incremental benchmark scoring helpers."""
 
+import asyncio
+from argparse import Namespace
+from types import SimpleNamespace
+
+import pandas as pd
 import pytest
 
+import scripts.run_community_incremental_benchmark as community_benchmark
 from scripts.run_community_incremental_benchmark import normalized_mutual_information
 from scripts.run_incremental_benchmark import (
     BASE_WORKFLOWS,
@@ -50,7 +56,11 @@ def test_aggregate_answers_reports_tokens_accuracy_and_recall():
             "objective_correct": True,
             "retrieval_hits": 1,
             "retrieval_gold_count": 1,
-            "llm_metrics": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            "llm_metrics": {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 12,
+            },
         },
         {
             "question_type": "MC",
@@ -58,7 +68,11 @@ def test_aggregate_answers_reports_tokens_accuracy_and_recall():
             "objective_correct": False,
             "retrieval_hits": 0,
             "retrieval_gold_count": 1,
-            "llm_metrics": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23},
+            "llm_metrics": {
+                "prompt_tokens": 20,
+                "completion_tokens": 3,
+                "total_tokens": 23,
+            },
         },
     ]
     summary = aggregate_answers(rows)["MC"]
@@ -75,7 +89,10 @@ def test_resume_helpers_use_first_unfinished_workflow(tmp_path):
         encoding="utf-8",
     )
     assert next_base_workflow(stats_path) == "extract_graph"
-    assert resumed_workflows(BASE_WORKFLOWS, "create_communities")[0] == "create_communities"
+    assert (
+        resumed_workflows(BASE_WORKFLOWS, "create_communities")[0]
+        == "create_communities"
+    )
 
 
 def test_resume_helpers_retry_embedding_and_merge_metrics(tmp_path):
@@ -112,9 +129,7 @@ def test_query_resume_rejects_artifacts_with_old_question_count(tmp_path):
     expected = [{"qid": "old-1"}, {"qid": "new-1"}]
     assert not stage_queries_complete(answers_path, summary_path, expected)
 
-    answers_path.write_text(
-        '{"qid": "old-1"}\n{"qid": "new-1"}\n', encoding="utf-8"
-    )
+    answers_path.write_text('{"qid": "old-1"}\n{"qid": "new-1"}\n', encoding="utf-8")
     summary_path.write_text('{"question_count": 2}', encoding="utf-8")
     assert stage_queries_complete(answers_path, summary_path, expected)
 
@@ -176,3 +191,174 @@ def test_query_timing_callbacks_capture_nonzero_phases(monkeypatch):
         {"a": "m", "b": "m", "c": "n"},
     ) == (1.0, 3)
     assert normalized_mutual_information({}, {}) == (None, 0)
+
+
+def test_community_benchmark_runs_base_questions_before_updates(tmp_path, monkeypatch):
+    calls = []
+
+    async def questions(**kwargs):
+        await asyncio.sleep(0)
+        calls.append(("questions", kwargs))
+        return [{"correct": True}]
+
+    async def update(**kwargs):
+        await asyncio.sleep(0)
+        calls.append(("update", kwargs))
+        return {"errors": []}
+
+    monkeypatch.setattr(
+        community_benchmark, "copy_base_tables", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(community_benchmark, "run_questions", questions)
+    monkeypatch.setattr(community_benchmark, "run_update", update)
+    monkeypatch.setattr(
+        community_benchmark, "collect_stage_nmi", lambda *args, **kwargs: (1.0, 1)
+    )
+
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    result = community_benchmark.orchestrate(
+        Namespace(
+            source_run_dir=source,
+            source_namespace="source-base",
+            output=output,
+            namespace="comparison",
+            overwrite=False,
+            resume=False,
+            community_level=0,
+            index_concurrency=4,
+            embedding_batch_size=4,
+            community_embedding_batch_size=1,
+            embedding_concurrency=1,
+            embedding_batch_max_tokens=1024,
+            vector_write_batch_size=128,
+        )
+    )
+
+    assert result == 0
+    assert calls[0][0] == "questions"
+    assert calls[0][1]["method"] == "base"
+    assert calls[0][1]["stage"] == 0
+    assert calls[0][1]["namespace"] == "source-base"
+    assert calls[0][1]["vector_source_dir"] == source.resolve()
+    assert [call[1]["stage"] for call in calls if call[0] == "update"] == [
+        1,
+        1,
+        2,
+        2,
+        3,
+        3,
+        4,
+        4,
+    ]
+
+
+def test_base_copy_resume_restarts_with_server_side_clone(tmp_path, monkeypatch):
+    frames = {
+        "entities": pd.DataFrame([{"id": "entity-1", "title": "Entity"}]),
+        "relationships": pd.DataFrame([{"id": "relationship-1"}]),
+        "text_units": pd.DataFrame([{"id": "text-unit-1"}]),
+        "documents": pd.DataFrame([{"id": "chunk-1", "text": "Body"}]),
+        "communities": pd.DataFrame([{"id": "community-1"}]),
+        "community_reports": pd.DataFrame([{"id": "report-1"}]),
+    }
+
+    class FakeNeo4jProvider:
+        def __init__(self, tables, *, vector_version=None):
+            self.tables = tables
+            self.vector_version = vector_version
+            self.writes = []
+            self.projection_rebuilds = 0
+            self.server_copies = 0
+            self.projection_deferred = False
+
+        async def get_active_provider(self):
+            return self
+
+        async def get_active_version(self):
+            return None
+
+        async def clear_namespace_tree(self):
+            msg = "resume must not clear the namespace"
+            raise AssertionError(msg)
+
+        async def has(self, table_name):
+            return table_name in self.tables
+
+        async def row_count(self, table_name):
+            return len(self.tables[table_name])
+
+        async def read_dataframe(self, table_name):
+            return self.tables[table_name].copy(deep=True)
+
+        async def write_dataframe(self, table_name, frame, *, rebuild_projection=True):
+            self.writes.append((table_name, rebuild_projection))
+            self.tables[table_name] = frame.copy(deep=True)
+
+        def defer_graph_projection(self):
+            self.projection_deferred = True
+
+        async def copy_namespace_from(self, source, *, rebuild_projection=False):
+            self.server_copies += 1
+            self.tables = {
+                name: frame.copy(deep=True) for name, frame in source.tables.items()
+            }
+            return {name: len(frame) for name, frame in self.tables.items()}
+
+        async def rebuild_graph_projection(self):
+            self.projection_rebuilds += 1
+            return {"RELATED": 1}
+
+        async def close(self):
+            return None
+
+    source = FakeNeo4jProvider(
+        {name: frame.copy(deep=True) for name, frame in frames.items()},
+        vector_version="base-version",
+    )
+    destination_tables = {
+        name: frame.copy(deep=True)
+        for name, frame in frames.items()
+        if name not in {"communities", "community_reports"}
+    }
+    destination_tables["communities"] = pd.DataFrame([{"id": "wrong"}])
+    destination = FakeNeo4jProvider(destination_tables)
+
+    monkeypatch.setattr(community_benchmark, "Neo4jTableProvider", FakeNeo4jProvider)
+    monkeypatch.setattr(
+        community_benchmark,
+        "configure_run",
+        lambda workspace, run_dir, namespace, metrics: SimpleNamespace(
+            table_provider=namespace, output_storage=namespace
+        ),
+    )
+    monkeypatch.setattr(community_benchmark, "create_storage", lambda value: value)
+    monkeypatch.setattr(
+        community_benchmark,
+        "create_table_provider",
+        lambda config, storage: source if config == "source-base" else destination,
+    )
+    monkeypatch.setattr(
+        community_benchmark,
+        "read_jsonl",
+        lambda path: [{"chunk_id": "chunk-1", "text": "Body"}],
+    )
+
+    run_dir = tmp_path / "destination"
+    community_benchmark.copy_base_tables(
+        tmp_path / "source",
+        run_dir,
+        "source-base",
+        "comparison-base",
+        resume=True,
+    )
+
+    assert destination.writes == []
+    assert destination.server_copies == 1
+    assert destination.projection_deferred is True
+    assert set(destination.tables) == set(frames)
+    assert destination.projection_rebuilds == 1
+    checkpoint = community_benchmark.load_json(run_dir / "base_copy_checkpoint.json")
+    assert checkpoint["status"] == "complete"
+    assert set(checkpoint["tables"]) == set(frames)
+    assert (run_dir / "lancedb").is_dir()

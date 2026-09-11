@@ -70,6 +70,11 @@ async def run_pipeline(
             output_table_provider = await version_provider.create_building_version(
                 update_timestamp
             )
+            output_table_provider.defer_graph_projection()
+            await output_table_provider.copy_namespace_from(
+                active_table_provider,
+                rebuild_projection=False,
+            )
 
         timestamped_storage = update_storage.child(update_timestamp)
         delta_storage = timestamped_storage.child("delta")
@@ -78,6 +83,8 @@ async def run_pipeline(
         update_base_provider = create_table_provider(
             config.table_provider, update_storage
         )
+        if isinstance(update_base_provider, Neo4jTableProvider):
+            update_base_provider.defer_graph_projection()
         update_table_provider = update_base_provider.child(update_timestamp)
         delta_table_provider = update_table_provider.child("delta")
         # copy the previous output to a backup folder, so we can replace it with the update
@@ -129,6 +136,20 @@ async def run_pipeline(
     ):
         pipeline_failed = pipeline_failed or table.error is not None
         yield table
+
+    if is_update_run and not pipeline_failed and version_provider:
+        try:
+            logger.info("Building the final Neo4j graph projection once before publish")
+            await output_table_provider.rebuild_graph_projection()
+        except Exception as error:  # pragma: no cover - exercised by integration tests
+            logger.exception("error rebuilding final Neo4j graph projection")
+            pipeline_failed = True
+            yield PipelineRunResult(
+                workflow="rebuild_graph_projection",
+                result=None,
+                state=context.state,
+                error=error,
+            )
 
     if is_update_run and not pipeline_failed:
         if version_provider:
@@ -216,9 +237,17 @@ async def _dump_context_json(context: PipelineRunContext) -> None:
     temp_context = context.state.pop(
         "additional_context", None
     )  # Remove reference only, as object size is uncertain
+    transient_frames = {
+        key: value
+        for key, value in list(context.state.items())
+        if isinstance(value, pd.DataFrame)
+    }
+    for key in transient_frames:
+        context.state.pop(key)
     try:
         state_blob = json.dumps(context.state, indent=4, ensure_ascii=False)
     finally:
+        context.state.update(transient_frames)
         if temp_context:
             context.state["additional_context"] = temp_context
 
@@ -230,6 +259,15 @@ async def _copy_previous_output(
     previous_table_provider: TableProvider,
 ) -> None:
     """Copy final output as the old-index baseline for this incremental merge."""
+    if isinstance(output_table_provider, Neo4jTableProvider) and isinstance(
+        previous_table_provider, Neo4jTableProvider
+    ):
+        previous_table_provider.defer_graph_projection()
+        await previous_table_provider.copy_namespace_from(
+            output_table_provider,
+            rebuild_projection=False,
+        )
+        return
     for table_name in output_table_provider.list():
         table = await output_table_provider.read_dataframe(table_name)
         await previous_table_provider.write_dataframe(table_name, table)
@@ -243,13 +281,11 @@ async def _cleanup_update_snapshots(
     version_provider: Neo4jTableProvider | None = None,
 ) -> None:
     """Remove update snapshots and table namespaces beyond retention."""
-    timestamps = sorted(
-        {
-            key.split("/", maxsplit=1)[0]
-            for key in update_storage.find(re.compile(r"."))
-            if re.fullmatch(r"\d{8}-\d{6}", key.split("/", maxsplit=1)[0])
-        }
-    )
+    timestamps = sorted({
+        key.split("/", maxsplit=1)[0]
+        for key in update_storage.find(re.compile(r"."))
+        if re.fullmatch(r"\d{8}-\d{6}", key.split("/", maxsplit=1)[0])
+    })
     expired_timestamps = timestamps[:-retention_count]
 
     if version_provider:

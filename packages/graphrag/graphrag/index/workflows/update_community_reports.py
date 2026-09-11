@@ -7,6 +7,7 @@ import logging
 
 import pandas as pd
 from graphrag_llm.completion import create_completion
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.table_provider import TableProvider
 
 from graphrag.cache.cache_key_creator import cache_key_creator
@@ -34,13 +35,32 @@ async def run_workflow(
     )
     output_reader = DataReader(output_provider)
     previous_reader = DataReader(previous_provider)
-    communities = await output_reader.communities()
-    old_reports = await previous_reader.community_reports()
 
     changed_ids = {
         int(value)
         for value in context.state.get("incremental_update_changed_community_ids", [])
     }
+    force_full_rebuild = bool(
+        context.state.get("additional_context", {}).get(
+            "force_full_community_rebuild", False
+        )
+    )
+    strategy = context.state.get("incremental_update_community_strategy")
+    if (
+        isinstance(output_provider, Neo4jTableProvider)
+        and isinstance(previous_provider, Neo4jTableProvider)
+        and strategy == "local"
+        and not force_full_rebuild
+    ):
+        return await _update_neo4j_local_reports(
+            config,
+            context,
+            output_provider,
+            changed_ids,
+        )
+
+    communities = await output_reader.communities()
+    old_reports = await previous_reader.community_reports()
     parent_by_id = {
         int(row["community"]): int(row["parent"]) for _, row in communities.iterrows()
     }
@@ -55,11 +75,6 @@ async def run_workflow(
         frontier = parents
 
     existing_report_ids = set(old_reports["community"].astype(int))
-    force_full_rebuild = bool(
-        context.state.get("additional_context", {}).get(
-            "force_full_community_rebuild", False
-        )
-    )
     if force_full_rebuild:
         changed_ids = set(parent_by_id)
     else:
@@ -100,6 +115,19 @@ async def run_workflow(
         num_threads=config.concurrent_requests,
         async_type=config.async_mode,
     )
+    regenerated_ids = (
+        set(regenerated["community"].astype(int))
+        if not regenerated.empty and "community" in regenerated.columns
+        else set()
+    )
+    missing_report_ids = changed_ids - regenerated_ids
+    if missing_report_ids:
+        sample = sorted(missing_report_ids)[:10]
+        msg = (
+            f"Community report generation omitted {len(missing_report_ids)} changed "
+            f"communities; sample IDs: {sample}"
+        )
+        raise RuntimeError(msg)
     reused = old_reports[
         ~old_reports["community"].astype(int).isin(changed_ids)
         & old_reports["community"].astype(int).isin(parent_by_id)
@@ -118,6 +146,104 @@ async def run_workflow(
     )
     logger.info("Workflow completed: update_community_reports")
     return WorkflowFunctionOutput(result=merged_reports)
+
+
+async def _update_neo4j_local_reports(
+    config: GraphRagConfig,
+    context: PipelineRunContext,
+    output: Neo4jTableProvider,
+    changed_ids: set[int],
+) -> WorkflowFunctionOutput:
+    """Regenerate only changed local communities from their referenced rows."""
+    pending = set(changed_ids)
+    affected = set(changed_ids)
+    frames: list[pd.DataFrame] = []
+    while pending:
+        frame = await output.read_communities_by_ids(pending)
+        if frame.empty:
+            break
+        frames.append(frame)
+        parents = {
+            int(value)
+            for value in frame["parent"]
+            if int(value) != -1 and int(value) not in affected
+        }
+        affected.update(parents)
+        pending = parents
+
+    communities = (
+        pd
+        .concat(frames, ignore_index=True)
+        .drop_duplicates(subset=["community"], keep="last")
+        .sort_values(["level", "community"], kind="stable")
+        if frames
+        else pd.DataFrame()
+    )
+    await output.delete_reports_by_community_ids(affected)
+    if communities.empty:
+        context.state["incremental_update_regenerated_community_report_ids"] = []
+        return WorkflowFunctionOutput(result=communities)
+
+    entity_ids = {
+        str(entity_id) for values in communities["entity_ids"] for entity_id in values
+    }
+    relationship_ids = {
+        str(relationship_id)
+        for values in communities["relationship_ids"]
+        for relationship_id in values
+    }
+    entities = await output.read_entities_by_ids(entity_ids)
+    relationships = await output.read_relationships_by_ids(relationship_ids)
+    claims = None
+    if config.extract_claims.enabled and await output.has("covariates"):
+        claims = await DataReader(output).covariates()
+
+    model_config = config.get_completion_model_config(
+        config.community_reports.completion_model_id
+    )
+    model = create_completion(
+        model_config,
+        cache=context.cache.child(config.community_reports.model_instance_name),
+        cache_key_creator=cache_key_creator,
+    )
+    prompts = config.community_reports.resolved_prompts()
+    regenerated = await create_community_reports(
+        relationships=relationships,
+        entities=entities,
+        communities=communities,
+        claims_input=claims,
+        callbacks=context.callbacks,
+        model=model,
+        tokenizer=model.tokenizer,
+        prompt=prompts.graph_prompt,
+        max_input_length=config.community_reports.max_input_length,
+        max_report_length=config.community_reports.max_length,
+        num_threads=config.concurrent_requests,
+        async_type=config.async_mode,
+    )
+    required = set(communities["community"].astype(int))
+    generated = (
+        set(regenerated["community"].astype(int))
+        if not regenerated.empty and "community" in regenerated.columns
+        else set()
+    )
+    missing = required - generated
+    if missing:
+        msg = (
+            f"Community report generation omitted {len(missing)} changed "
+            f"communities; sample IDs: {sorted(missing)[:10]}"
+        )
+        raise RuntimeError(msg)
+    await output.upsert_dataframe("community_reports", regenerated)
+    context.state["incremental_update_regenerated_community_report_ids"] = sorted(
+        required
+    )
+    logger.info(
+        "Regenerated %d local community reports; stable reports remain in the clone",
+        len(regenerated),
+    )
+    logger.info("Workflow completed: update_community_reports")
+    return WorkflowFunctionOutput(result=regenerated)
 
 
 async def _update_community_reports(

@@ -12,7 +12,10 @@ from graphrag.data_model.schemas import ENTITIES_FINAL_COLUMNS
 
 
 def _group_and_resolve_entities(
-    old_entities_df: pd.DataFrame, delta_entities_df: pd.DataFrame
+    old_entities_df: pd.DataFrame,
+    delta_entities_df: pd.DataFrame,
+    *,
+    initial_human_readable_id: int | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Group and resolve entities.
 
@@ -39,7 +42,13 @@ def _group_and_resolve_entities(
     id_mapping = dict(zip(merged["id_B"], merged["id_A"], strict=True))
 
     # Increment human readable id in b by the max of a
-    initial_id = old_entities_df["human_readable_id"].max() + 1
+    initial_id = initial_human_readable_id
+    if initial_id is None:
+        initial_id = (
+            int(old_entities_df["human_readable_id"].max()) + 1
+            if not old_entities_df.empty
+            else 0
+        )
     delta_entities_df["human_readable_id"] = np.arange(
         initial_id, initial_id + len(delta_entities_df)
     )

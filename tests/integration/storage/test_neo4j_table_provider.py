@@ -135,9 +135,9 @@ async def test_version_publish_and_failure_keep_active(provider: Neo4jTableProvi
 
     active_after_failure = await provider.get_active_provider()
     assert active_after_failure.vector_version == "first"
-    assert (
-        await active_after_failure.read_dataframe("entities")
-    ).iloc[0]["title"] == "first"
+    assert (await active_after_failure.read_dataframe("entities")).iloc[0][
+        "title"
+    ] == "first"
 
     second_version = await provider.create_building_version("second")
     await second_version.write_dataframe(
@@ -147,11 +147,79 @@ async def test_version_publish_and_failure_keep_active(provider: Neo4jTableProvi
 
     active_after_publish = await provider.get_active_provider()
     assert active_after_publish.vector_version == "second"
-    assert (
-        await active_after_publish.read_dataframe("entities")
-    ).iloc[0]["title"] == "second"
+    assert (await active_after_publish.read_dataframe("entities")).iloc[0][
+        "title"
+    ] == "second"
 
     await provider.clear_versions(["first", "failed", "second"])
     assert not await first_version.has("entities")
     assert not await failed_version.has("entities")
     assert await active_after_publish.has("entities")
+
+
+@pytest.mark.asyncio
+async def test_server_side_copy_and_targeted_updates(provider: Neo4jTableProvider):
+    entities = pd.DataFrame([
+        {
+            "id": "entity-a",
+            "human_readable_id": 0,
+            "title": "Alice",
+            "type": "PERSON",
+            "degree": 1,
+        },
+        {
+            "id": "entity-b",
+            "human_readable_id": 1,
+            "title": "Bob",
+            "type": "PERSON",
+            "degree": 1,
+        },
+    ])
+    relationships = pd.DataFrame([
+        {
+            "id": "relationship-1",
+            "human_readable_id": 0,
+            "source": "Alice",
+            "target": "Bob",
+            "description": "knows",
+            "weight": 1.0,
+            "combined_degree": 2,
+            "text_unit_ids": ["text-1"],
+        }
+    ])
+    await provider.write_dataframe("entities", entities, rebuild_projection=False)
+    await provider.write_dataframe(
+        "relationships", relationships, rebuild_projection=False
+    )
+
+    clone = provider.child("clone")
+    clone.defer_graph_projection()
+    counts = await clone.copy_namespace_from(provider)
+    assert counts == {"entities": 2, "relationships": 1}
+    pd.testing.assert_frame_equal(await clone.read_dataframe("entities"), entities)
+    assert set((await clone.read_entities_by_titles({"Alice"}))["title"]) == {"Alice"}
+    assert len(await clone.read_relationships_by_keys({("Alice", "Bob")})) == 1
+
+    updated = entities.iloc[[0]].copy()
+    updated.loc[:, "degree"] = 2
+    await clone.upsert_dataframe("entities", updated)
+    cloned_entities = await clone.read_dataframe("entities")
+    assert len(cloned_entities) == 2
+    assert (
+        int(cloned_entities.loc[cloned_entities["title"] == "Alice", "degree"].iloc[0])
+        == 2
+    )
+    assert await clone.relationship_degree_counts({"Alice", "Bob"}) == {
+        "Alice": 1,
+        "Bob": 1,
+    }
+
+    async with provider._driver.session(database="neo4j") as session:  # noqa: SLF001
+        result = await session.run(
+            "MATCH (:GraphRAGRecord {namespace: $namespace})-[edge]->() "
+            "RETURN count(edge) AS count",
+            namespace=clone._namespace,  # noqa: SLF001
+        )
+        record = await result.single()
+    assert record is not None
+    assert record["count"] == 0

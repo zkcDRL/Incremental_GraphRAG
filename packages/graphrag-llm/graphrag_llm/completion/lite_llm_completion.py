@@ -321,10 +321,21 @@ def _with_sse_aggregation(
 ) -> tuple[Callable[..., Any], Callable[..., Any]]:
     """Force non-streaming calls through SSE and retry mid-stream failures."""
 
+    def _validate_content(content: str, kwargs: dict[str, Any]) -> None:
+        if not content.strip():
+            msg = "Forced SSE completion returned empty content."
+            raise ValueError(msg)
+        response_format = kwargs.get("response_format")
+        if response_format is not None:
+            # Validate inside the retry boundary. completion()/completion_async()
+            # parse it again to attach the typed response after retries succeed.
+            structure_completion_response(content, response_format)
+
     def _aggregate_sync(**kwargs: Any):
         response = sync_completion(**{**kwargs, "stream": True})
         if isinstance(response, Iterator):
             content = "".join(_chunk_content(chunk) for chunk in response)
+            _validate_content(content, kwargs)
             return create_completion_response(content)
         return response
 
@@ -334,6 +345,7 @@ def _with_sse_aggregation(
             content = ""
             async for chunk in response:
                 content += _chunk_content(chunk)
+            _validate_content(content, kwargs)
             return create_completion_response(content)
         return response
 

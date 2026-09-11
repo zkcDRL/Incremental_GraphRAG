@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import hashlib
 import json
 import math
 import shutil
@@ -21,12 +22,15 @@ from typing import Any
 import pandas as pd
 from graphrag.api.index import build_index
 from graphrag.api.query import local_search
-from graphrag.config.enums import IndexingMethod
+from graphrag.config.enums import AsyncType, IndexingMethod
 from graphrag.data_model.data_reader import DataReader
+from graphrag_llm.completion.completion_factory import register_completion
 from graphrag_storage import create_storage
 from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.table_provider_factory import create_table_provider
 
+from scripts.base_sse_completion import BaseSSECompletion
+from scripts.prepare_community_benchmark_base import validate_documents
 from scripts.run_incremental_benchmark import (
     QueryTimingCallbacks,
     configure_run,
@@ -42,7 +46,16 @@ from scripts.run_incremental_benchmark import (
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / "GraphRAG-Bench-community-incremental-v2"
 WORKSPACE = ROOT / "rag_workspace"
-DEFAULT_SOURCE_NAMESPACE = "graphrag-bench-incremental-101"
+DEFAULT_SOURCE_NAMESPACE = "graphrag-bench-incremental-164"
+
+
+def positive_int(value: str) -> int:
+    """Parse a positive command-line integer."""
+    parsed = int(value)
+    if parsed < 1:
+        msg = "value must be a positive integer"
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -56,11 +69,11 @@ class StageDefinition:
 
 
 _CORPUS_NAMES = (
-    "00_base_851.jsonl",
-    "01_micro_local_50.jsonl",
-    "02_near_region_50.jsonl",
-    "03_far_existing_books_50.jsonl",
-    "04_new_textbook_regions_50.jsonl",
+    "00_base_1800.jsonl",
+    "01_micro_local_30.jsonl",
+    "02_near_region_30.jsonl",
+    "03_far_existing_books_30.jsonl",
+    "04_new_textbook_regions_30.jsonl",
 )
 STAGES = tuple(
     StageDefinition(
@@ -82,6 +95,16 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def dataframe_fingerprint(frame: pd.DataFrame) -> dict[str, Any]:
+    """Return a stable fingerprint for a Neo4j table round trip."""
+    payload = frame.to_json(orient="records", date_format="iso", force_ascii=False)
+    return {
+        "rows": len(frame),
+        "columns": list(frame.columns),
+        "sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+    }
 
 
 def question_prompt(item: dict[str, Any]) -> str:
@@ -207,8 +230,10 @@ def copy_base_tables(
     destination: Path,
     source_namespace: str,
     destination_namespace: str,
+    *,
+    resume: bool = False,
 ) -> None:
-    """Copy base logical tables and vectors into an isolated comparison namespace."""
+    """Copy Base tables, validating and skipping completed work when resumed."""
     print(f"Copying base data from namespace: {source_namespace}", flush=True)
     print(f"Preparing destination namespace: {destination_namespace}", flush=True)
     source_config = configure_run(
@@ -233,12 +258,62 @@ def copy_base_tables(
         msg = "Both comparison providers must be Neo4j providers"
         raise TypeError(msg)
 
+    checkpoint_path = destination / "base_copy_checkpoint.json"
+
     async def copy() -> None:
         source_active = await source_provider.get_active_provider()
-        print(
-            f"[{destination_namespace}] clearing destination namespace...", flush=True
+        source_documents = await source_active.read_dataframe("documents")
+        validate_documents(
+            source_documents, read_jsonl(DATASET / "corpus" / _CORPUS_NAMES[0])
         )
-        await destination_provider.clear_namespace_tree()
+        source_version = source_active.vector_version or "legacy"
+        source_identity = {
+            "source_namespace": source_namespace,
+            "source_version": source_version,
+            "base_file": _CORPUS_NAMES[0],
+            "documents": dataframe_fingerprint(source_documents),
+        }
+        checkpoint = load_json(checkpoint_path, {}) if resume else {}
+        if (
+            resume
+            and checkpoint.get("status") == "complete"
+            and checkpoint.get("source") == source_identity
+            and checkpoint.get("destination_namespace") == destination_namespace
+        ):
+            print(
+                f"[{destination_namespace}] Base copy checkpoint is complete; "
+                "skipping all tables and graph projection.",
+                flush=True,
+            )
+            return
+
+        if resume:
+            active_namespace = await destination_provider.get_active_version()
+            if active_namespace not in {None, destination_namespace}:
+                msg = (
+                    f"[{destination_namespace}] cannot resume Base copy because an "
+                    f"updated version is already active: {active_namespace}"
+                )
+                raise RuntimeError(msg)
+            print(
+                f"[{destination_namespace}] resume enabled; validating existing tables...",
+                flush=True,
+            )
+        else:
+            print(
+                f"[{destination_namespace}] clearing destination namespace...",
+                flush=True,
+            )
+            await destination_provider.clear_namespace_tree()
+
+        checkpoint = {
+            "status": "copying",
+            "source": source_identity,
+            "destination_namespace": destination_namespace,
+            "tables": {},
+            "projection": {},
+        }
+        write_json(checkpoint_path, checkpoint)
         table_names = (
             "entities",
             "relationships",
@@ -247,34 +322,57 @@ def copy_base_tables(
             "communities",
             "community_reports",
         )
+        destination_provider.defer_graph_projection()
+        print(
+            f"[{destination_namespace}] copying all tables inside Neo4j...",
+            flush=True,
+        )
+        copied_counts = await destination_provider.copy_namespace_from(
+            source_active,
+            rebuild_projection=False,
+        )
+        missing_tables = set(table_names) - copied_counts.keys()
+        if missing_tables:
+            msg = (
+                f"[{destination_namespace}] server-side copy omitted tables: "
+                f"{sorted(missing_tables)}"
+            )
+            raise RuntimeError(msg)
         for table_number, table_name in enumerate(table_names, start=1):
+            row_count = copied_counts[table_name]
+            checkpoint["tables"][table_name] = {"rows": row_count}
             print(
-                f"[{destination_namespace}] copying table {table_number}/{len(table_names)}: "
-                f"{table_name}",
+                f"[{destination_namespace}] copied table "
+                f"{table_number}/{len(table_names)}: {table_name}: {row_count} rows",
                 flush=True,
             )
-            table = await source_active.read_dataframe(table_name)
-            await destination_provider.write_dataframe(table_name, table)
-            print(
-                f"[{destination_namespace}] copied {table_name}: {len(table)} rows",
-                flush=True,
-            )
+        write_json(checkpoint_path, checkpoint)
         print(f"[{destination_namespace}] rebuilding graph projection...", flush=True)
         counts = await destination_provider.rebuild_graph_projection()
+        checkpoint["projection"] = counts
         print(
             f"[{destination_namespace}] base namespace ready; projection edges: {counts}",
             flush=True,
         )
-        await source_provider.close()
-        await destination_provider.close()
+        destination_vectors = destination / "lancedb"
+        if destination_vectors.exists():
+            shutil.rmtree(destination_vectors)
+        destination_vectors.mkdir(parents=True, exist_ok=True)
+        checkpoint["status"] = "complete"
+        write_json(checkpoint_path, checkpoint)
+        print(
+            f"[{destination_namespace}] vector indexes will be rebuilt by the update run",
+            flush=True,
+        )
 
-    asyncio.run(copy())
-    source_vectors = source / "lancedb"
-    destination_vectors = destination / "lancedb"
-    if source_vectors.exists():
-        print(f"[{destination_namespace}] copying vector indexes...", flush=True)
-        shutil.copytree(source_vectors, destination_vectors, dirs_exist_ok=True)
-        print(f"[{destination_namespace}] vector indexes ready", flush=True)
+    async def copy_with_cleanup() -> None:
+        try:
+            await copy()
+        finally:
+            await source_provider.close()
+            await destination_provider.close()
+
+    asyncio.run(copy_with_cleanup())
 
 
 async def run_update(
@@ -284,29 +382,53 @@ async def run_update(
     delta_path: Path,
     run_dir: Path,
     namespace: str,
+    index_concurrency: int,
+    embedding_batch_size: int,
+    community_embedding_batch_size: int,
+    embedding_concurrency: int,
+    embedding_batch_max_tokens: int,
+    vector_write_batch_size: int,
 ) -> dict[str, Any]:
     """Run one incremental update and return measured metadata."""
     metrics_dir = run_dir / "metrics" / f"stage_{stage}" / "index"
     config = configure_run(WORKSPACE, run_dir, namespace, metrics_dir)
+    config.async_mode = AsyncType.AsyncIO
+    config.concurrent_requests = index_concurrency
+    register_completion("base_sse", BaseSSECompletion)
+    report_model = config.get_completion_model_config(
+        config.community_reports.completion_model_id
+    )
+    report_model.type = "base_sse"
+    report_model.checkpoint_dir = str(run_dir / "completion_checkpoints")
     print(
         f"[{method}] Stage {stage}: starting update with "
         f"{len(documents_dataframe(delta_path))} new chunks",
         flush=True,
     )
+    additional_context: dict[str, Any] = {
+        "embedding_runtime": {
+            "request_batch_size": embedding_batch_size,
+            "community_request_batch_size": community_embedding_batch_size,
+            "concurrency": embedding_concurrency,
+            "batch_max_tokens": embedding_batch_max_tokens,
+            "vector_write_batch_size": vector_write_batch_size,
+        }
+    }
     if method == "full":
         config.update.adaptive_community_update = False
-        additional_context = {"force_full_community_rebuild": True}
-    else:
-        additional_context = {}
+        additional_context["force_full_community_rebuild"] = True
     started = time.perf_counter()
-    results = await build_index(
-        config,
-        method=IndexingMethod.Standard,
-        is_update_run=True,
-        input_documents=documents_dataframe(delta_path),
-        additional_context=additional_context,
-        verbose=False,
-    )
+    try:
+        results = await build_index(
+            config,
+            method=IndexingMethod.Standard,
+            is_update_run=True,
+            input_documents=documents_dataframe(delta_path),
+            additional_context=additional_context,
+            verbose=False,
+        )
+    finally:
+        await BaseSSECompletion.close_clients()
     elapsed = time.perf_counter() - started
     errors = [str(result.error) for result in results if result.error is not None]
     result_state = results[-1].state if results else {}
@@ -338,7 +460,7 @@ async def run_update(
             f"reports={len(report_ids)}",
             flush=True,
         )
-    return {
+    result = {
         "stage": stage,
         "method": method,
         "new_chunk_count": len(documents_dataframe(delta_path)),
@@ -347,9 +469,18 @@ async def run_update(
         "community_update": update,
         "community_strategy": update.get("strategy"),
         "reports_generated": len(report_ids),
+        "index_concurrency": index_concurrency,
+        "embedding_batch_size": embedding_batch_size,
+        "community_embedding_batch_size": community_embedding_batch_size,
+        "embedding_concurrency": embedding_concurrency,
+        "embedding_batch_max_tokens": embedding_batch_max_tokens,
+        "vector_write_batch_size": vector_write_batch_size,
         **report_metrics,
         "errors": errors,
     }
+    if not errors:
+        write_json(run_dir / f"stage_{stage}" / "update_metrics.json", result)
+    return result
 
 
 async def run_questions(
@@ -359,11 +490,15 @@ async def run_questions(
     question_path: Path,
     run_dir: Path,
     namespace: str,
+    vector_source_dir: Path | None = None,
+    resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run cumulative questions and save raw answers for offline judging."""
     config = configure_run(
         WORKSPACE, run_dir, namespace, run_dir / "metrics" / f"stage_{stage}" / "query"
     )
+    if vector_source_dir is not None:
+        config.vector_store.db_uri = str((vector_source_dir / "lancedb").resolve())
     provider = create_table_provider(
         config.table_provider, create_storage(config.output_storage)
     )
@@ -375,16 +510,29 @@ async def run_questions(
         reader = DataReader(active)
         entity_frame = await reader.entities()
         questions = read_jsonl(question_path)
-        rows: list[dict[str, Any]] = []
         stage_dir = run_dir / f"stage_{stage}"
         stage_dir.mkdir(parents=True, exist_ok=True)
         output = stage_dir / "question_results.jsonl"
+        rows: list[dict[str, Any]] = (
+            read_jsonl(output) if resume and output.exists() else []
+        )
+        expected_prefix = [str(item["qid"]) for item in questions[: len(rows)]]
+        saved_prefix = [str(row.get("qid")) for row in rows]
+        if (
+            saved_prefix != expected_prefix
+            or any(row.get("stage") != stage for row in rows)
+            or any(row.get("method") != method for row in rows)
+        ):
+            msg = f"[{method}] Stage {stage}: saved question prefix is incompatible"
+            raise ValueError(msg)
         print(
             f"[{method}] Stage {stage}: starting evaluation of "
-            f"{len(questions)} questions",
+            f"{len(questions)} questions; resuming after {len(rows)} completed",
             flush=True,
         )
-        for question_number, item in enumerate(questions, start=1):
+        for question_number, item in enumerate(
+            questions[len(rows) :], start=len(rows) + 1
+        ):
             print(
                 f"[{method}] Stage {stage}: question {question_number}/{len(questions)} "
                 f"started ({item['qid']})",
@@ -504,6 +652,17 @@ def orchestrate(args: argparse.Namespace) -> int:
     print("Community incremental benchmark starting", flush=True)
     print(f"Dataset: {DATASET}", flush=True)
     print(f"Output: {output}", flush=True)
+    print(
+        "Runtime limits: "
+        f"index_concurrency={args.index_concurrency}, "
+        f"embedding_batch_size={args.embedding_batch_size}, "
+        "community_embedding_batch_size="
+        f"{args.community_embedding_batch_size}, "
+        f"embedding_concurrency={args.embedding_concurrency}, "
+        f"embedding_batch_max_tokens={args.embedding_batch_max_tokens}, "
+        f"vector_write_batch_size={args.vector_write_batch_size}",
+        flush=True,
+    )
     if output.exists() and args.overwrite:
         shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -512,10 +671,46 @@ def orchestrate(args: argparse.Namespace) -> int:
         print(f"Preparing {method} namespace: {args.namespace}-{method}", flush=True)
         method_dir.mkdir(exist_ok=True)
         copy_base_tables(
-            source, method_dir, args.source_namespace, f"{args.namespace}-{method}"
+            source,
+            method_dir,
+            args.source_namespace,
+            f"{args.namespace}-{method}",
+            resume=args.resume,
         )
 
-    summaries: list[dict[str, Any]] = []
+    base_dir = output / "base"
+    base_dir.mkdir(exist_ok=True)
+    print("===== Stage 0: published 1800-chunk Base =====", flush=True)
+    base_questions = asyncio.run(
+        run_questions(
+            method="base",
+            stage=0,
+            question_path=DATASET / "questions" / "cumulative" / "stage_0.jsonl",
+            run_dir=base_dir,
+            namespace=args.source_namespace,
+            vector_source_dir=source,
+            resume=args.resume,
+        )
+    )
+    base_correct = sum(bool(row["correct"]) for row in base_questions)
+    summaries: list[dict[str, Any]] = [
+        {
+            "stage": 0,
+            "method": "base",
+            "new_chunk_count": 0,
+            "update_wall_time_s": 0.0,
+            "community_strategy": "published_base",
+            "reports_generated": 0,
+            "report_llm_calls": 0,
+            "report_input_tokens": 0,
+            "report_output_tokens": 0,
+            "report_total_tokens": 0,
+            "errors": [],
+            "evaluated_questions": len(base_questions),
+            "correct_questions": base_correct,
+            "accuracy": base_correct / max(1, len(base_questions)),
+        }
+    ]
     for stage_def in STAGES:
         print(
             f"===== Stage {stage_def.stage}: {stage_def.delta_path.name} =====",
@@ -523,15 +718,40 @@ def orchestrate(args: argparse.Namespace) -> int:
         )
         for method, method_dir in methods.items():
             namespace = f"{args.namespace}-{method}"
-            update = asyncio.run(
-                run_update(
-                    method=method,
-                    stage=stage_def.stage,
-                    delta_path=stage_def.delta_path,
-                    run_dir=method_dir,
-                    namespace=namespace,
-                )
+            update_path = (
+                method_dir / f"stage_{stage_def.stage}" / "update_metrics.json"
             )
+            saved_update = load_json(update_path) if args.resume else None
+            if (
+                isinstance(saved_update, dict)
+                and saved_update.get("stage") == stage_def.stage
+                and saved_update.get("method") == method
+                and not saved_update.get("errors")
+            ):
+                update = saved_update
+                print(
+                    f"[{method}] Stage {stage_def.stage}: completed update "
+                    "checkpoint found; skipping update.",
+                    flush=True,
+                )
+            else:
+                update = asyncio.run(
+                    run_update(
+                        method=method,
+                        stage=stage_def.stage,
+                        delta_path=stage_def.delta_path,
+                        run_dir=method_dir,
+                        namespace=namespace,
+                        index_concurrency=args.index_concurrency,
+                        embedding_batch_size=args.embedding_batch_size,
+                        community_embedding_batch_size=(
+                            args.community_embedding_batch_size
+                        ),
+                        embedding_concurrency=args.embedding_concurrency,
+                        embedding_batch_max_tokens=args.embedding_batch_max_tokens,
+                        vector_write_batch_size=args.vector_write_batch_size,
+                    )
+                )
             if update["errors"]:
                 raise RuntimeError(
                     f"[{method}] Stage {stage_def.stage} update failed; "
@@ -544,25 +764,50 @@ def orchestrate(args: argparse.Namespace) -> int:
                     question_path=stage_def.question_path,
                     run_dir=method_dir,
                     namespace=namespace,
+                    resume=args.resume,
                 )
             )
             update["evaluated_questions"] = len(questions)
             update["correct_questions"] = sum(bool(row["correct"]) for row in questions)
             update["accuracy"] = update["correct_questions"] / max(1, len(questions))
             summaries.append(update)
-        nmi, compared_nodes = collect_stage_nmi(
-            methods["incremental"],
-            f"{args.namespace}-incremental",
-            methods["full"],
-            f"{args.namespace}-full",
-            level=args.community_level,
-        )
+        nmi_path = output / f"stage_{stage_def.stage}_nmi.json"
+        saved_nmi = load_json(nmi_path) if args.resume else None
+        if (
+            isinstance(saved_nmi, dict)
+            and saved_nmi.get("stage") == stage_def.stage
+            and saved_nmi.get("community_level") == args.community_level
+        ):
+            nmi = saved_nmi.get("community_nmi")
+            compared_nodes = int(saved_nmi.get("compared_node_count", 0))
+            print(
+                f"Stage {stage_def.stage}: completed NMI checkpoint found; skipping.",
+                flush=True,
+            )
+        else:
+            nmi, compared_nodes = collect_stage_nmi(
+                methods["incremental"],
+                f"{args.namespace}-incremental",
+                methods["full"],
+                f"{args.namespace}-full",
+                level=args.community_level,
+            )
+            write_json(
+                nmi_path,
+                {
+                    "stage": stage_def.stage,
+                    "community_nmi": nmi,
+                    "compared_node_count": compared_nodes,
+                    "community_level": args.community_level,
+                },
+            )
         for update in summaries[-2:]:
             update["community_nmi"] = nmi
             update["compared_node_count"] = compared_nodes
             update["community_level"] = args.community_level
 
-    for method, method_dir in methods.items():
+    result_dirs = {"base": base_dir, **methods}
+    for method, method_dir in result_dirs.items():
         rows = [
             row
             for result_path in sorted(method_dir.glob("stage_*/question_results.jsonl"))
@@ -613,7 +858,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--source-run-dir",
         type=Path,
-        default=WORKSPACE / "benchmark_results" / "incremental-101",
+        default=WORKSPACE / "benchmark_results" / "incremental-164",
     )
     result.add_argument("--source-namespace", default=DEFAULT_SOURCE_NAMESPACE)
     result.add_argument(
@@ -622,8 +867,22 @@ def parser() -> argparse.ArgumentParser:
         default=WORKSPACE / "benchmark_results" / "community-incremental-v2",
     )
     result.add_argument("--namespace", default="graphrag-community-incremental-v2")
-    result.add_argument("--overwrite", action="store_true")
+    output_mode = result.add_mutually_exclusive_group()
+    output_mode.add_argument("--overwrite", action="store_true")
+    output_mode.add_argument(
+        "--resume",
+        action="store_true",
+        help="validate and reuse completed Base copies, updates, questions, and NMI",
+    )
     result.add_argument("--community-level", type=int, default=0)
+    result.add_argument("--index-concurrency", type=positive_int, default=4)
+    result.add_argument("--embedding-batch-size", type=positive_int, default=4)
+    result.add_argument(
+        "--community-embedding-batch-size", type=positive_int, default=1
+    )
+    result.add_argument("--embedding-concurrency", type=positive_int, default=1)
+    result.add_argument("--embedding-batch-max-tokens", type=positive_int, default=1024)
+    result.add_argument("--vector-write-batch-size", type=positive_int, default=128)
     return result
 
 

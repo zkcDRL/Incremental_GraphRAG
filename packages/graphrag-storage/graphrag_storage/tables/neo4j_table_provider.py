@@ -23,7 +23,7 @@ from graphrag_storage.tables.table import RowTransformer, Table
 from graphrag_storage.tables.table_provider import TableProvider
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Collection
 
 _RECORD_LABELS = {
     "documents": "Document",
@@ -51,9 +51,10 @@ def _row_properties(row: dict[str, Any]) -> dict[str, Any]:
     for key, value in row.items():
         if value is None:
             continue
-        if isinstance(value, (str, int, float, bool)) or (isinstance(value, list) and all(
-            isinstance(item, (str, int, float, bool)) for item in value
-        )):
+        if isinstance(value, (str, int, float, bool)) or (
+            isinstance(value, list)
+            and all(isinstance(item, (str, int, float, bool)) for item in value)
+        ):
             properties[key] = value
         elif isinstance(value, (list, dict)):
             properties[key] = json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -61,7 +62,9 @@ def _row_properties(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _records_from_dataframe(df: pd.DataFrame) -> list[dict[str, Any]]:
-    rows = json.loads(df.to_json(orient="records", date_format="iso", force_ascii=False))
+    rows = json.loads(
+        df.to_json(orient="records", date_format="iso", force_ascii=False)
+    )
     return [
         {
             "row_id": str(row.get("id", index)),
@@ -89,6 +92,8 @@ class Neo4jTableProvider(TableProvider):
         database: str = "neo4j",
         namespace: str = "",
         vector_version: str | None = None,
+        batch_size: int = 50,
+        rebuild_projection_on_write: bool = True,
         _driver: AsyncDriver | None = None,
         _list_driver: Driver | None = None,
         **_: Any,
@@ -96,13 +101,17 @@ class Neo4jTableProvider(TableProvider):
         if not password and _driver is None:
             msg = "Neo4jTableProvider requires a 'password' configuration value."
             raise ValueError(msg)
-        self._driver = _driver or AsyncGraphDatabase.driver(uri, auth=(username, password))
+        self._driver = _driver or AsyncGraphDatabase.driver(
+            uri, auth=(username, password)
+        )
         self._list_driver = _list_driver or GraphDatabase.driver(
             uri, auth=(username, password)
         )
         self._database = database
         self._namespace = namespace
         self._vector_version = vector_version
+        self._batch_size = max(1, batch_size)
+        self._rebuild_projection_on_write = rebuild_projection_on_write
         self._owns_driver = _driver is None
         self._owns_list_driver = _list_driver is None
         self._initialized = False
@@ -120,6 +129,41 @@ class Neo4jTableProvider(TableProvider):
                 "CREATE CONSTRAINT graphrag_table_key IF NOT EXISTS "
                 "FOR (table:GraphRAGTable) "
                 "REQUIRE (table.namespace, table.name) IS UNIQUE"
+            )
+            await session.run(
+                "CREATE INDEX graphrag_record_ordinal IF NOT EXISTS "
+                "FOR (record:GraphRAGRecord) "
+                "ON (record.namespace, record.table_name, record.ordinal)"
+            )
+            for label in _RECORD_LABELS.values():
+                await session.run(
+                    f"CREATE INDEX graphrag_{label.lower()}_row_id IF NOT EXISTS "
+                    f"FOR (record:{label}) ON (record.namespace, record.row_id)"
+                )
+            await session.run(
+                "CREATE INDEX graphrag_entity_title IF NOT EXISTS "
+                "FOR (record:Entity) ON (record.namespace, record.title)"
+            )
+            await session.run(
+                "CREATE INDEX graphrag_relationship_key IF NOT EXISTS "
+                "FOR (record:Relationship) "
+                "ON (record.namespace, record.source, record.target)"
+            )
+            await session.run(
+                "CREATE INDEX graphrag_relationship_source IF NOT EXISTS "
+                "FOR (record:Relationship) ON (record.namespace, record.source)"
+            )
+            await session.run(
+                "CREATE INDEX graphrag_relationship_target IF NOT EXISTS "
+                "FOR (record:Relationship) ON (record.namespace, record.target)"
+            )
+            await session.run(
+                "CREATE INDEX graphrag_community_id IF NOT EXISTS "
+                "FOR (record:Community) ON (record.namespace, record.community)"
+            )
+            await session.run(
+                "CREATE INDEX graphrag_community_level IF NOT EXISTS "
+                "FOR (record:Community) ON (record.namespace, record.level)"
             )
         self._initialized = True
 
@@ -234,7 +278,9 @@ class Neo4jTableProvider(TableProvider):
             )
 
     @staticmethod
-    async def _clear_versions_transaction(tx, namespace: str, versions: list[str]) -> None:
+    async def _clear_versions_transaction(
+        tx, namespace: str, versions: list[str]
+    ) -> None:
         result = await tx.run(
             "MATCH (version:GraphRAGVersion {logical_namespace: $namespace}) "
             "WHERE version.version IN $versions AND version.state <> 'active' "
@@ -266,6 +312,8 @@ class Neo4jTableProvider(TableProvider):
             database=self._database,
             namespace=namespace,
             vector_version=vector_version,
+            batch_size=self._batch_size,
+            rebuild_projection_on_write=self._rebuild_projection_on_write,
             _driver=self._driver,
             _list_driver=self._list_driver,
         )
@@ -291,7 +339,446 @@ class Neo4jTableProvider(TableProvider):
         rows = [json.loads(record["data"]) for record in records if record["data"]]
         return pd.DataFrame(rows, columns=columns)
 
-    async def write_dataframe(self, table_name: str, df: pd.DataFrame) -> None:
+    async def _table_columns(self, table_name: str) -> list[str]:
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (table:GraphRAGTable {namespace: $namespace, name: $table_name}) "
+                "RETURN table.columns AS columns",
+                namespace=self._namespace,
+                table_name=table_name,
+            )
+            record = await result.single()
+        return json.loads(record["columns"]) if record and record["columns"] else []
+
+    async def _read_filtered_dataframe(
+        self,
+        table_name: str,
+        query: str,
+        **parameters: Any,
+    ) -> pd.DataFrame:
+        """Read selected JSON records while retaining the logical table schema."""
+        columns = await self._table_columns(table_name)
+        if not columns:
+            return pd.DataFrame()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                query,
+                namespace=self._namespace,
+                **parameters,
+            )
+            rows = [
+                json.loads(record["data"]) async for record in result if record["data"]
+            ]
+        return pd.DataFrame(rows, columns=columns)
+
+    async def read_entities_by_titles(self, titles: Collection[str]) -> pd.DataFrame:
+        """Read only entities whose canonical title is requested."""
+        return await self._read_filtered_dataframe(
+            "entities",
+            "MATCH (record:Entity {namespace: $namespace}) "
+            "WHERE record.title IN $titles "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            titles=sorted({str(value) for value in titles}),
+        )
+
+    async def read_entities_by_ids(self, entity_ids: Collection[str]) -> pd.DataFrame:
+        """Read only entities whose row IDs are requested."""
+        return await self._read_filtered_dataframe(
+            "entities",
+            "MATCH (record:Entity {namespace: $namespace}) "
+            "WHERE record.row_id IN $row_ids "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            row_ids=sorted({str(value) for value in entity_ids}),
+        )
+
+    async def read_relationships_by_keys(
+        self, keys: Collection[tuple[str, str]]
+    ) -> pd.DataFrame:
+        """Read only relationships with an exact source/target key."""
+        return await self._read_filtered_dataframe(
+            "relationships",
+            "UNWIND $keys AS key "
+            "MATCH (record:Relationship {namespace: $namespace, "
+            "source: key.source, target: key.target}) "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            keys=[
+                {"source": str(source), "target": str(target)}
+                for source, target in sorted(set(keys))
+            ],
+        )
+
+    async def read_relationships_by_ids(
+        self, relationship_ids: Collection[str]
+    ) -> pd.DataFrame:
+        """Read only relationships whose row IDs are requested."""
+        return await self._read_filtered_dataframe(
+            "relationships",
+            "MATCH (record:Relationship {namespace: $namespace}) "
+            "WHERE record.row_id IN $row_ids "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            row_ids=sorted({str(value) for value in relationship_ids}),
+        )
+
+    async def read_relationships_for_titles(
+        self,
+        titles: Collection[str],
+        *,
+        induced: bool = False,
+    ) -> pd.DataFrame:
+        """Read relationships incident to, or induced by, the supplied titles."""
+        predicate = (
+            "record.source IN $titles AND record.target IN $titles"
+            if induced
+            else "record.source IN $titles OR record.target IN $titles"
+        )
+        return await self._read_filtered_dataframe(
+            "relationships",
+            "MATCH (record:Relationship {namespace: $namespace}) "
+            f"WHERE {predicate} "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            titles=sorted({str(value) for value in titles}),
+        )
+
+    async def read_communities_for_entity_ids(
+        self,
+        entity_ids: Collection[str],
+        *,
+        level: int | None = None,
+    ) -> pd.DataFrame:
+        """Read communities containing any supplied entity ID."""
+        level_filter = (
+            "AND toInteger(record.level) = $level " if level is not None else ""
+        )
+        return await self._read_filtered_dataframe(
+            "communities",
+            "MATCH (record:Community {namespace: $namespace}) "
+            "WHERE any(entity_id IN coalesce(record.entity_ids, []) "
+            "WHERE entity_id IN $entity_ids) "
+            f"{level_filter}"
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            entity_ids=sorted({str(value) for value in entity_ids}),
+            level=level,
+        )
+
+    async def read_communities_by_ids(
+        self, community_ids: Collection[int]
+    ) -> pd.DataFrame:
+        """Read selected communities by numeric community ID."""
+        return await self._read_filtered_dataframe(
+            "communities",
+            "MATCH (record:Community {namespace: $namespace}) "
+            "WHERE toInteger(record.community) IN $community_ids "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            community_ids=sorted({int(value) for value in community_ids}),
+        )
+
+    async def read_reports_by_community_ids(
+        self, community_ids: Collection[int]
+    ) -> pd.DataFrame:
+        """Read reports for selected numeric community IDs."""
+        return await self._read_filtered_dataframe(
+            "community_reports",
+            "MATCH (record:CommunityReport {namespace: $namespace}) "
+            "WHERE toInteger(record.community) IN $community_ids "
+            "RETURN record.data AS data ORDER BY record.ordinal",
+            community_ids=sorted({int(value) for value in community_ids}),
+        )
+
+    async def read_dataframe_streaming(self, table_name: str) -> pd.DataFrame:
+        """Materialize a full table through bounded Neo4j result pages."""
+        columns = await self._table_columns(table_name)
+        rows = [row async for row in self.iter_rows(table_name)]
+        return pd.DataFrame(rows, columns=columns)
+
+    async def iter_rows(self, table_name: str) -> AsyncIterator[dict[str, Any]]:
+        """Stream table rows from Neo4j without materializing a DataFrame."""
+        await self._ensure_schema()
+        after_ordinal = -1
+        while True:
+            async with self._driver.session(database=self._database) as session:
+                result = await session.run(
+                    "MATCH (record:GraphRAGRecord "
+                    "{namespace: $namespace, table_name: $table_name}) "
+                    "WHERE record.ordinal > $after_ordinal "
+                    "RETURN record.ordinal AS ordinal, record.data AS data "
+                    "ORDER BY record.ordinal LIMIT $batch_size",
+                    namespace=self._namespace,
+                    table_name=table_name,
+                    after_ordinal=after_ordinal,
+                    batch_size=self._batch_size,
+                )
+                records = [record async for record in result]
+
+            if not records:
+                return
+            for record in records:
+                if record["data"]:
+                    yield json.loads(record["data"])
+            after_ordinal = int(records[-1]["ordinal"])
+
+    async def row_count(self, table_name: str) -> int:
+        """Count table rows without loading their JSON payloads."""
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (record:GraphRAGRecord "
+                "{namespace: $namespace, table_name: $table_name}) "
+                "RETURN count(record) AS count",
+                namespace=self._namespace,
+                table_name=table_name,
+            )
+            record = await result.single()
+        return int(record["count"]) if record else 0
+
+    async def count_rows_with_value(
+        self, table_name: str, property_name: str, value: Any
+    ) -> int:
+        """Count rows matching one indexed scalar property."""
+        allowed = {"level", "type", "community"}
+        if property_name not in allowed:
+            msg = f"Unsupported count property: {property_name}"
+            raise ValueError(msg)
+        await self._ensure_schema()
+        label = _RECORD_LABELS.get(table_name, "GraphRAGRecord")
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                f"MATCH (record:{label} "
+                "{namespace: $namespace, table_name: $table_name}) "
+                f"WHERE record.{property_name} = $value "
+                "RETURN count(record) AS count",
+                namespace=self._namespace,
+                table_name=table_name,
+                value=value,
+            )
+            record = await result.single()
+        return int(record["count"]) if record else 0
+
+    async def max_numeric_property(self, table_name: str, property_name: str) -> int:
+        """Return a table's maximum numeric scalar, or -1 for an empty table."""
+        allowed = {"human_readable_id", "community"}
+        if property_name not in allowed:
+            msg = f"Unsupported maximum property: {property_name}"
+            raise ValueError(msg)
+        await self._ensure_schema()
+        label = _RECORD_LABELS.get(table_name, "GraphRAGRecord")
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                f"MATCH (record:{label} "
+                "{namespace: $namespace, table_name: $table_name}) "
+                f"RETURN max(toInteger(record.{property_name})) AS maximum",
+                namespace=self._namespace,
+                table_name=table_name,
+            )
+            record = await result.single()
+        maximum = record["maximum"] if record else None
+        return int(maximum) if maximum is not None else -1
+
+    async def relationship_degree_counts(
+        self, titles: Collection[str]
+    ) -> dict[str, int]:
+        """Count relationship endpoints for selected entity titles."""
+        values = sorted({str(value) for value in titles})
+        if not values:
+            return {}
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (record:Relationship {namespace: $namespace}) "
+                "UNWIND [record.source, record.target] AS endpoint "
+                "WITH endpoint WHERE endpoint IN $titles "
+                "RETURN endpoint, count(*) AS degree",
+                namespace=self._namespace,
+                titles=values,
+            )
+            return {
+                str(record["endpoint"]): int(record["degree"])
+                async for record in result
+            }
+
+    async def root_community_membership_count(self) -> int:
+        """Count entity memberships in all level-zero communities."""
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (record:Community {namespace: $namespace}) "
+                "WHERE toInteger(record.level) = 0 "
+                "RETURN sum(size(coalesce(record.entity_ids, []))) AS count",
+                namespace=self._namespace,
+            )
+            record = await result.single()
+        return int(record["count"] or 0) if record else 0
+
+    async def upsert_dataframe(self, table_name: str, df: pd.DataFrame) -> None:
+        """Insert or replace selected rows without clearing the logical table."""
+        if df.empty:
+            return
+        await self._ensure_schema()
+        label = _RECORD_LABELS.get(table_name)
+        label_clause = f":{label}" if label else ""
+        columns = list(df.columns)
+        maximum = await self.max_ordinal(table_name)
+        records = _records_from_dataframe(df)
+        for offset, row in enumerate(records, start=1):
+            row["ordinal"] = maximum + offset
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                "MERGE (table:GraphRAGTable {namespace: $namespace, name: $table_name}) "
+                "ON CREATE SET table.columns = $columns",
+                namespace=self._namespace,
+                table_name=table_name,
+                columns=json.dumps(columns, ensure_ascii=False),
+            )
+            for start in range(0, len(records), self._batch_size):
+                result = await session.run(
+                    "UNWIND $records AS row "
+                    f"MERGE (record:GraphRAGRecord{label_clause} "
+                    "{namespace: $namespace, table_name: $table_name, row_id: row.row_id}) "
+                    "ON CREATE SET record.ordinal = row.ordinal "
+                    "WITH record, row, record.ordinal AS ordinal "
+                    "SET record = row.properties "
+                    "SET record.namespace = $namespace, record.table_name = $table_name, "
+                    "record.row_id = row.row_id, record.data = row.data, record.ordinal = ordinal",
+                    namespace=self._namespace,
+                    table_name=table_name,
+                    records=records[start : start + self._batch_size],
+                )
+                await result.consume()
+
+    async def max_ordinal(self, table_name: str) -> int:
+        """Return the largest storage ordinal for one table."""
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (record:GraphRAGRecord "
+                "{namespace: $namespace, table_name: $table_name}) "
+                "RETURN max(record.ordinal) AS maximum",
+                namespace=self._namespace,
+                table_name=table_name,
+            )
+            record = await result.single()
+        maximum = record["maximum"] if record else None
+        return int(maximum) if maximum is not None else -1
+
+    async def delete_rows_by_ids(
+        self, table_name: str, row_ids: Collection[str]
+    ) -> None:
+        """Delete selected table rows and their projected relationships."""
+        values = sorted({str(value) for value in row_ids})
+        if not values:
+            return
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (record:GraphRAGRecord "
+                "{namespace: $namespace, table_name: $table_name}) "
+                "WHERE record.row_id IN $row_ids DETACH DELETE record",
+                namespace=self._namespace,
+                table_name=table_name,
+                row_ids=values,
+            )
+            await result.consume()
+
+    async def delete_reports_by_community_ids(
+        self, community_ids: Collection[int]
+    ) -> None:
+        """Delete reports belonging to selected communities."""
+        values = sorted({int(value) for value in community_ids})
+        if not values:
+            return
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (record:CommunityReport {namespace: $namespace}) "
+                "WHERE toInteger(record.community) IN $community_ids "
+                "DETACH DELETE record",
+                namespace=self._namespace,
+                community_ids=values,
+            )
+            await result.consume()
+
+    def defer_graph_projection(self) -> None:
+        """Disable automatic projection rebuilds until explicitly requested."""
+        self._rebuild_projection_on_write = False
+
+    async def copy_namespace_from(
+        self,
+        source: Neo4jTableProvider,
+        *,
+        rebuild_projection: bool = False,
+    ) -> dict[str, int]:
+        """Clone complete logical tables inside Neo4j without a Python round trip."""
+        if self._database != source._database:
+            msg = "Neo4j namespace copies require the same database"
+            raise ValueError(msg)
+        if self._namespace == source._namespace:
+            msg = "Neo4j namespace copy source and destination must differ"
+            raise ValueError(msg)
+        await self._ensure_schema()
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (node) WHERE node.namespace = $destination DETACH DELETE node",
+                destination=self._namespace,
+            )
+            await result.consume()
+            result = await session.run(
+                "MATCH (source:GraphRAGTable {namespace: $source}) "
+                "RETURN source.name AS name, source.columns AS columns ORDER BY name",
+                source=source._namespace,
+            )
+            tables = [record.data() async for record in result]
+
+        counts: dict[str, int] = {}
+        clone_batch_size = max(1000, self._batch_size)
+        for table in tables:
+            table_name = str(table["name"])
+            label = _RECORD_LABELS.get(table_name)
+            label_clause = f":{label}" if label else ""
+            async with self._driver.session(database=self._database) as session:
+                result = await session.run(
+                    "CREATE (target:GraphRAGTable "
+                    "{namespace: $destination, name: $table_name, columns: $columns})",
+                    destination=self._namespace,
+                    table_name=table_name,
+                    columns=table["columns"],
+                )
+                await result.consume()
+            after_ordinal = -1
+            copied = 0
+            while True:
+                async with self._driver.session(database=self._database) as session:
+                    result = await session.run(
+                        "MATCH (source:GraphRAGRecord "
+                        "{namespace: $source, table_name: $table_name}) "
+                        "WHERE source.ordinal > $after_ordinal "
+                        "WITH source ORDER BY source.ordinal LIMIT $batch_size "
+                        f"CREATE (target:GraphRAGRecord{label_clause}) "
+                        "SET target = source{.*, namespace: $destination} "
+                        "RETURN count(target) AS copied, max(source.ordinal) AS maximum",
+                        source=source._namespace,
+                        destination=self._namespace,
+                        table_name=table_name,
+                        after_ordinal=after_ordinal,
+                        batch_size=clone_batch_size,
+                    )
+                    record = await result.single()
+                batch_count = int(record["copied"]) if record else 0
+                if batch_count == 0:
+                    break
+                copied += batch_count
+                after_ordinal = int(record["maximum"])
+            counts[table_name] = copied
+        if rebuild_projection:
+            await self.rebuild_graph_projection()
+        return counts
+
+    async def write_dataframe(
+        self,
+        table_name: str,
+        df: pd.DataFrame,
+        *,
+        rebuild_projection: bool | None = None,
+    ) -> None:
         """Replace one logical table and rebuild its graph projection."""
         await self._ensure_schema()
         records = _records_from_dataframe(df)
@@ -312,8 +799,8 @@ class Neo4jTableProvider(TableProvider):
                 namespace=self._namespace,
                 table_name=table_name,
             )
-            if records:
-                await session.run(
+            for start in range(0, len(records), self._batch_size):
+                result = await session.run(
                     "UNWIND $records AS row "
                     f"MERGE (record:GraphRAGRecord{label_clause} "
                     "{namespace: $namespace, table_name: $table_name, row_id: row.row_id}) "
@@ -322,10 +809,17 @@ class Neo4jTableProvider(TableProvider):
                     "record.row_id = row.row_id, record.data = row.data, record.ordinal = row.ordinal",
                     namespace=self._namespace,
                     table_name=table_name,
-                    records=records,
+                    records=records[start : start + self._batch_size],
                 )
+                await result.consume()
 
-        await self.rebuild_graph_projection()
+        should_rebuild = (
+            self._rebuild_projection_on_write
+            if rebuild_projection is None
+            else rebuild_projection
+        )
+        if should_rebuild:
+            await self.rebuild_graph_projection()
 
     async def rebuild_graph_projection(self) -> dict[str, int]:
         """Rebuild all graph-native edges from the current logical tables.
@@ -382,12 +876,27 @@ class Neo4jTableProvider(TableProvider):
         await self._ensure_schema()
         prefix = f"{self._namespace}/"
         async with self._driver.session(database=self._database) as session:
+            while True:
+                result = await session.run(
+                    "MATCH (node) WHERE node.namespace = $namespace "
+                    "OR node.namespace STARTS WITH $prefix "
+                    "WITH node LIMIT 1000 DETACH DELETE node "
+                    "RETURN count(node) AS deleted",
+                    namespace=self._namespace,
+                    prefix=prefix,
+                )
+                record = await result.single()
+                if not record or int(record["deleted"]) == 0:
+                    break
             result = await session.run(
-                "MATCH (node) WHERE node.namespace = $namespace "
-                "OR node.namespace STARTS WITH $prefix "
-                "DETACH DELETE node",
+                "MATCH (version:GraphRAGVersion {logical_namespace: $namespace}) "
+                "DELETE version",
                 namespace=self._namespace,
-                prefix=prefix,
+            )
+            await result.consume()
+            result = await session.run(
+                "MATCH (meta:GraphRAGNamespace {name: $namespace}) DELETE meta",
+                namespace=self._namespace,
             )
             await result.consume()
 
@@ -453,21 +962,27 @@ class Neo4jTableProvider(TableProvider):
                     relationship_ids=relationship_ids,
                 )
             ]
-            community_records = list(session.run(
-                "MATCH (community:Community {namespace: $namespace})-[:HAS_MEMBER]->"
-                "(member:Entity {namespace: $namespace}) "
-                "WHERE member.row_id IN $seed_ids "
-                "WITH DISTINCT community "
-                "OPTIONAL MATCH (report:CommunityReport {namespace: $namespace})-[:REPORTS_ON]->(community) "
-                "RETURN community.data AS community_data, report.data AS report_data",
-                namespace=self._namespace,
-                seed_ids=seed_entity_ids,
-            ))
+            community_records = list(
+                session.run(
+                    "MATCH (community:Community {namespace: $namespace})-[:HAS_MEMBER]->"
+                    "(member:Entity {namespace: $namespace}) "
+                    "WHERE member.row_id IN $seed_ids "
+                    "WITH DISTINCT community "
+                    "OPTIONAL MATCH (report:CommunityReport {namespace: $namespace})-[:REPORTS_ON]->(community) "
+                    "RETURN community.data AS community_data, report.data AS report_data",
+                    namespace=self._namespace,
+                    seed_ids=seed_entity_ids,
+                )
+            )
             community_rows = [
-                record["community_data"] for record in community_records if record["community_data"]
+                record["community_data"]
+                for record in community_records
+                if record["community_data"]
             ]
             report_rows = [
-                record["report_data"] for record in community_records if record["report_data"]
+                record["report_data"]
+                for record in community_records
+                if record["report_data"]
             ]
 
         def to_dataframe(rows: list[str]) -> pd.DataFrame:
@@ -553,12 +1068,20 @@ class Neo4jTableProvider(TableProvider):
         if not links:
             return
         async with self._driver.session(database=self._database) as session:
-            result = await session.run(query, namespace=self._namespace, links=links)
-            await result.consume()
+            for start in range(0, len(links), self._batch_size):
+                result = await session.run(
+                    query,
+                    namespace=self._namespace,
+                    links=links[start : start + self._batch_size],
+                )
+                await result.consume()
 
     async def _link_documents(self, df: pd.DataFrame) -> None:
         links = [
-            {"source": str(row["id"]), "targets": [str(value) for value in row.get("text_unit_ids", [])]}
+            {
+                "source": str(row["id"]),
+                "targets": [str(value) for value in row.get("text_unit_ids", [])],
+            }
             for row in df.to_dict("records")
         ]
         await self._run_links(
@@ -660,7 +1183,10 @@ class Neo4jTableProvider(TableProvider):
             ("HAS_CHILD", "children", "Community"),
         ):
             links = [
-                {"source": str(row["id"]), "targets": [str(value) for value in row.get(field, [])]}
+                {
+                    "source": str(row["id"]),
+                    "targets": [str(value) for value in row.get(field, [])],
+                }
                 for row in rows
             ]
             await self._run_links(
@@ -710,21 +1236,19 @@ class Neo4jTable(Table):
         return self._iterate()
 
     async def _iterate(self) -> AsyncIterator[Any]:
-        if self._read_df is None:
-            if await self._provider.has(self._table_name):
-                self._read_df = await self._provider.read_dataframe(self._table_name)
-            else:
-                self._read_df = pd.DataFrame()
-        for row in self._read_df.to_dict("records"):
+        if self._read_df is not None:
+            for row in self._read_df.to_dict("records"):
+                yield _apply_transformer(self._transformer, row)
+            return
+
+        async for row in self._provider.iter_rows(self._table_name):
             yield _apply_transformer(self._transformer, row)
 
     async def length(self) -> int:
         """Return the count of currently visible rows."""
-        if self._read_df is None:
-            if not await self._provider.has(self._table_name):
-                return 0
-            self._read_df = await self._provider.read_dataframe(self._table_name)
-        return len(self._read_df)
+        if self._read_df is not None:
+            return len(self._read_df)
+        return await self._provider.row_count(self._table_name)
 
     async def has(self, row_id: str) -> bool:
         """Check whether this table contains the row ID."""

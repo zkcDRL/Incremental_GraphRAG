@@ -5,6 +5,8 @@
 
 import logging
 
+import pandas as pd
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.table_provider import TableProvider
 
 from graphrag.config.models.graph_rag_config import GraphRagConfig
@@ -14,12 +16,20 @@ from graphrag.index.typing.context import PipelineRunContext
 from graphrag.index.typing.workflow import WorkflowFunctionOutput
 from graphrag.index.update.communities import (
     CommunityDriftState,
+    CommunityUpdateMetrics,
+    CommunityUpdateResult,
     CommunityUpdateStrategy,
+    _changed_community_ids,
+    _rebuild_children,
+    _reconcile_ids,
+    _root_title_mapping,
+    _starting_communities,
     _update_and_merge_communities,
     community_modularity,
     drift_threshold_reasons,
     relative_modularity_drop,
     root_membership_churn,
+    select_strategy,
     update_communities_adaptively,
 )
 
@@ -37,39 +47,59 @@ async def run_workflow(
         context.state["update_timestamp"],
         context.final_output_table_provider,
     )
-    previous_reader = DataReader(previous_provider)
-    old_communities = await previous_reader.communities()
-    old_entities = await previous_reader.entities()
-    old_relationships = await previous_reader.relationships()
     merged_entities = context.state["incremental_update_merged_entities"]
     merged_relationships = context.state["incremental_update_merged_relationships"]
-
-    result = update_communities_adaptively(
-        old_communities,
-        old_entities,
-        old_relationships,
-        merged_entities,
-        merged_relationships,
-        max_cluster_size=config.cluster_graph.max_cluster_size,
-        use_lcc=config.cluster_graph.use_lcc,
-        seed=config.cluster_graph.seed,
-        local_edge_ratio=config.update.local_edge_ratio,
-        local_community_ratio=config.update.local_community_ratio,
-        cold_start_edge_ratio=config.update.cold_start_edge_ratio,
-        community_hops=config.update.community_hops,
-        adaptive_update_enabled=config.update.adaptive_community_update,
-    )
-    result, drift_state, drift_reasons = _apply_drift_policy(
-        result,
-        context.state.get("community_drift_state"),
-        old_communities,
-        old_entities,
-        old_relationships,
-        merged_entities,
-        merged_relationships,
-        config,
-    )
-    await output_provider.write_dataframe("communities", result.communities)
+    targeted = merged_relationships.attrs.get("neo4j_incremental")
+    if (
+        isinstance(output_provider, Neo4jTableProvider)
+        and isinstance(previous_provider, Neo4jTableProvider)
+        and isinstance(targeted, dict)
+    ):
+        (
+            result,
+            drift_state,
+            drift_reasons,
+            full_replacement,
+        ) = await _update_neo4j_communities(
+            previous_provider,
+            output_provider,
+            targeted,
+            context.state.get("community_drift_state"),
+            config,
+        )
+        if full_replacement:
+            await output_provider.write_dataframe("communities", result.communities)
+    else:
+        previous_reader = DataReader(previous_provider)
+        old_communities = await previous_reader.communities()
+        old_entities = await previous_reader.entities()
+        old_relationships = await previous_reader.relationships()
+        result = update_communities_adaptively(
+            old_communities,
+            old_entities,
+            old_relationships,
+            merged_entities,
+            merged_relationships,
+            max_cluster_size=config.cluster_graph.max_cluster_size,
+            use_lcc=config.cluster_graph.use_lcc,
+            seed=config.cluster_graph.seed,
+            local_edge_ratio=config.update.local_edge_ratio,
+            local_community_ratio=config.update.local_community_ratio,
+            cold_start_edge_ratio=config.update.cold_start_edge_ratio,
+            community_hops=config.update.community_hops,
+            adaptive_update_enabled=config.update.adaptive_community_update,
+        )
+        result, drift_state, drift_reasons = _apply_drift_policy(
+            result,
+            context.state.get("community_drift_state"),
+            old_communities,
+            old_entities,
+            old_relationships,
+            merged_entities,
+            merged_relationships,
+            config,
+        )
+        await output_provider.write_dataframe("communities", result.communities)
 
     metrics = result.metrics
     context.state["incremental_update_community_strategy"] = metrics.strategy.value
@@ -114,6 +144,290 @@ async def run_workflow(
     return WorkflowFunctionOutput(result=result.communities)
 
 
+async def _update_neo4j_communities(
+    previous: Neo4jTableProvider,
+    output: Neo4jTableProvider,
+    targeted: dict,
+    persisted_drift: dict | None,
+    config: GraphRagConfig,
+) -> tuple[CommunityUpdateResult, CommunityDriftState, tuple[str, ...], bool]:
+    """Plan from delta rows and load a bounded graph for a local Leiden update."""
+    changed_edges = {
+        tuple(str(item) for item in value)
+        for value in targeted.get("changed_edge_keys", [])
+    }
+    affected_titles = {
+        str(value) for value in targeted.get("affected_entity_titles", [])
+    }
+    edge_union_count = await output.row_count("relationships")
+    affected_edge_ratio = (
+        len(changed_edges) / edge_union_count if edge_union_count else 0.0
+    )
+
+    if not changed_edges:
+        metrics = CommunityUpdateMetrics(
+            strategy=CommunityUpdateStrategy.LOCAL,
+            changed_edge_count=0,
+            edge_union_count=edge_union_count,
+            affected_edge_ratio=0.0,
+            direct_community_ids=(),
+            expanded_community_ids=(),
+            affected_community_ratio=0.0,
+        )
+        empty = await previous.read_communities_by_ids(set())
+        return (
+            CommunityUpdateResult(empty, metrics, ()),
+            CommunityDriftState.from_dict(persisted_drift),
+            (),
+            False,
+        )
+
+    old_endpoint_entities = await previous.read_entities_by_titles(affected_titles)
+    old_endpoint_ids = set(
+        old_endpoint_entities.get("id", pd.Series(dtype=str)).astype(str)
+    )
+    direct_roots = await previous.read_communities_for_entity_ids(
+        old_endpoint_ids, level=0
+    )
+    direct_ids = set(direct_roots.get("community", pd.Series(dtype=int)).astype(int))
+    root_count = await previous.count_rows_with_value("communities", "level", 0)
+    affected_community_ratio = len(direct_ids) / root_count if root_count else 0.0
+    strategy = (
+        CommunityUpdateStrategy.GLOBAL_COLD
+        if root_count == 0
+        else select_strategy(
+            affected_edge_ratio,
+            affected_community_ratio,
+            local_edge_ratio=config.update.local_edge_ratio,
+            local_community_ratio=config.update.local_community_ratio,
+            cold_start_edge_ratio=config.update.cold_start_edge_ratio,
+            adaptive_update_enabled=config.update.adaptive_community_update,
+        )
+    )
+    if strategy != CommunityUpdateStrategy.LOCAL:
+        return await _run_neo4j_global_update(
+            previous,
+            output,
+            config,
+            persisted_drift,
+        )
+
+    expanded_ids = set(direct_ids)
+    frontier = set(direct_ids)
+    for _ in range(config.update.community_hops):
+        if not frontier:
+            break
+        frontier_rows = await previous.read_communities_by_ids(frontier)
+        frontier_roots = (
+            frontier_rows[frontier_rows["level"].astype(int) == 0]
+            if not frontier_rows.empty
+            else frontier_rows
+        )
+        member_ids = {
+            str(entity_id)
+            for values in frontier_roots.get("entity_ids", pd.Series(dtype=object))
+            for entity_id in values
+        }
+        member_entities = await previous.read_entities_by_ids(member_ids)
+        member_titles = set(
+            member_entities.get("title", pd.Series(dtype=str)).astype(str)
+        )
+        incident = await output.read_relationships_for_titles(member_titles)
+        neighbor_titles = set(
+            incident.get("source", pd.Series(dtype=str)).astype(str)
+        ) | set(incident.get("target", pd.Series(dtype=str)).astype(str))
+        neighbor_entities = await previous.read_entities_by_titles(neighbor_titles)
+        neighbor_ids = set(
+            neighbor_entities.get("id", pd.Series(dtype=str)).astype(str)
+        )
+        neighbor_roots = await previous.read_communities_for_entity_ids(
+            neighbor_ids, level=0
+        )
+        next_ids = (
+            set(neighbor_roots.get("community", pd.Series(dtype=int)).astype(int))
+            - expanded_ids
+        )
+        expanded_ids.update(next_ids)
+        frontier = next_ids
+
+    root_rows = await previous.read_communities_by_ids(expanded_ids)
+    if not root_rows.empty:
+        root_rows = root_rows[root_rows["level"].astype(int) == 0]
+    region_old_ids = {
+        str(entity_id)
+        for values in root_rows.get("entity_ids", pd.Series(dtype=object))
+        for entity_id in values
+    }
+    root_entities = await previous.read_entities_by_ids(region_old_ids)
+    region_titles = affected_titles | set(
+        root_entities.get("title", pd.Series(dtype=str)).astype(str)
+    )
+    local_entities = await output.read_entities_by_titles(region_titles)
+    local_relationships = await output.read_relationships_for_titles(
+        region_titles, induced=True
+    )
+    edge_nodes = set(
+        local_relationships.get("source", pd.Series(dtype=str)).astype(str)
+    ) | set(local_relationships.get("target", pd.Series(dtype=str)).astype(str))
+    if edge_nodes:
+        local_entities = local_entities[
+            local_entities["title"].astype(str).isin(edge_nodes)
+        ].copy()
+    local_entity_ids = set(local_entities.get("id", pd.Series(dtype=str)).astype(str))
+    old_candidates = await previous.read_communities_for_entity_ids(local_entity_ids)
+    title_to_root, _ = _root_title_mapping(root_rows, root_entities)
+
+    from graphrag.index.workflows.create_communities import (
+        build_communities_dataframe,
+    )
+
+    local_new = build_communities_dataframe(
+        local_entities,
+        local_relationships,
+        max_cluster_size=config.cluster_graph.max_cluster_size,
+        use_lcc=False,
+        seed=config.cluster_graph.seed,
+        starting_communities=_starting_communities(edge_nodes, title_to_root),
+    )
+    max_old_id = await previous.max_numeric_property("communities", "community")
+    local_final = _rebuild_children(
+        _reconcile_ids(local_new, old_candidates, max_old_id)
+    )
+    old_candidate_ids = set(
+        old_candidates.get("community", pd.Series(dtype=int)).astype(int)
+    )
+    final_ids = set(local_final.get("community", pd.Series(dtype=int)).astype(int))
+    changed_ids = set(_changed_community_ids(old_candidates, local_final))
+    changed_ids.update(old_candidate_ids - final_ids)
+    await output.delete_rows_by_ids(
+        "communities",
+        old_candidates.get("id", pd.Series(dtype=str)).astype(str),
+    )
+    await output.upsert_dataframe("communities", local_final)
+
+    metrics = CommunityUpdateMetrics(
+        strategy=CommunityUpdateStrategy.LOCAL,
+        changed_edge_count=len(changed_edges),
+        edge_union_count=edge_union_count,
+        affected_edge_ratio=affected_edge_ratio,
+        direct_community_ids=tuple(sorted(direct_ids)),
+        expanded_community_ids=tuple(sorted(expanded_ids)),
+        affected_community_ratio=affected_community_ratio,
+    )
+    result = CommunityUpdateResult(
+        local_final,
+        metrics,
+        tuple(sorted(changed_ids)),
+    )
+
+    previous_state = CommunityDriftState.from_dict(persisted_drift)
+    local_old_root_members = (
+        sum(
+            len(values)
+            for values in old_candidates[
+                old_candidates.get("level", pd.Series(dtype=int)).astype(int) == 0
+            ].get("entity_ids", pd.Series(dtype=object))
+        )
+        if not old_candidates.empty
+        else 0
+    )
+    local_churn = root_membership_churn(old_candidates, local_final)
+    total_root_members = await previous.root_community_membership_count()
+    global_churn = (
+        local_churn * local_old_root_members / total_root_members
+        if total_root_members
+        else 0.0
+    )
+    drift_state = CommunityDriftState(
+        consecutive_local_updates=previous_state.consecutive_local_updates + 1,
+        cumulative_edge_change_ratio=min(
+            1.0,
+            previous_state.cumulative_edge_change_ratio + affected_edge_ratio,
+        ),
+        cumulative_membership_churn=min(
+            1.0,
+            previous_state.cumulative_membership_churn + global_churn,
+        ),
+        baseline_modularity=previous_state.baseline_modularity,
+        current_modularity=previous_state.current_modularity,
+        modularity_drop=previous_state.modularity_drop,
+    )
+    reasons = drift_threshold_reasons(
+        drift_state,
+        max_consecutive_local_updates=config.update.max_consecutive_local_updates,
+        max_cumulative_edge_change_ratio=config.update.max_cumulative_edge_change_ratio,
+        max_cumulative_membership_churn=(config.update.max_cumulative_membership_churn),
+        max_modularity_drop=config.update.max_modularity_drop,
+    )
+    if reasons:
+        global_result, global_state, global_reasons, _ = await _run_neo4j_global_update(
+            previous,
+            output,
+            config,
+            persisted_drift,
+            forced_strategy=CommunityUpdateStrategy.GLOBAL_SEEDED,
+        )
+        return (
+            global_result,
+            global_state,
+            tuple(dict.fromkeys((*reasons, *global_reasons))),
+            True,
+        )
+    return result, drift_state, reasons, False
+
+
+async def _run_neo4j_global_update(
+    previous: Neo4jTableProvider,
+    output: Neo4jTableProvider,
+    config: GraphRagConfig,
+    persisted_drift: dict | None,
+    forced_strategy: CommunityUpdateStrategy | None = None,
+) -> tuple[CommunityUpdateResult, CommunityDriftState, tuple[str, ...], bool]:
+    """Stream complete tables only after strategy selection requires a global run."""
+    old_communities = await previous.read_dataframe_streaming("communities")
+    old_entities = await previous.read_dataframe_streaming("entities")
+    old_relationships = await previous.read_dataframe_streaming("relationships")
+    merged_entities = await output.read_dataframe_streaming("entities")
+    merged_relationships = await output.read_dataframe_streaming("relationships")
+    if forced_strategy is None:
+        result = update_communities_adaptively(
+            old_communities,
+            old_entities,
+            old_relationships,
+            merged_entities,
+            merged_relationships,
+            max_cluster_size=config.cluster_graph.max_cluster_size,
+            use_lcc=config.cluster_graph.use_lcc,
+            seed=config.cluster_graph.seed,
+            local_edge_ratio=config.update.local_edge_ratio,
+            local_community_ratio=config.update.local_community_ratio,
+            cold_start_edge_ratio=config.update.cold_start_edge_ratio,
+            community_hops=config.update.community_hops,
+            adaptive_update_enabled=config.update.adaptive_community_update,
+        )
+    else:
+        result = _rerun_global(
+            old_communities,
+            old_entities,
+            old_relationships,
+            merged_entities,
+            merged_relationships,
+            config,
+            forced_strategy,
+        )
+    result, drift_state, drift_reasons = _apply_drift_policy(
+        result,
+        persisted_drift,
+        old_communities,
+        old_entities,
+        old_relationships,
+        merged_entities,
+        merged_relationships,
+        config,
+    )
+    return result, drift_state, drift_reasons, True
+
+
 def _apply_drift_policy(
     result,
     persisted_state: dict | None,
@@ -156,10 +470,14 @@ def _apply_drift_policy(
             current_modularity = community_modularity(
                 merged_relationships, result.communities, merged_entities
             )
-            return result, CommunityDriftState(
-                baseline_modularity=current_modularity,
-                current_modularity=current_modularity,
-            ), ("seeded_modularity_drop",)
+            return (
+                result,
+                CommunityDriftState(
+                    baseline_modularity=current_modularity,
+                    current_modularity=current_modularity,
+                ),
+                ("seeded_modularity_drop",),
+            )
 
     if result.metrics.strategy == CommunityUpdateStrategy.LOCAL:
         drift_state = CommunityDriftState(
@@ -220,17 +538,25 @@ def _apply_drift_policy(
                 seeded_modularity = community_modularity(
                     merged_relationships, result.communities, merged_entities
                 )
-            return result, CommunityDriftState(
-                baseline_modularity=seeded_modularity,
-                current_modularity=seeded_modularity,
-            ), reasons
+            return (
+                result,
+                CommunityDriftState(
+                    baseline_modularity=seeded_modularity,
+                    current_modularity=seeded_modularity,
+                ),
+                reasons,
+            )
         return result, drift_state, reasons
 
     # Any planned global run establishes a fresh baseline and clears cumulative drift.
-    return result, CommunityDriftState(
-        baseline_modularity=current_modularity,
-        current_modularity=current_modularity,
-    ), ()
+    return (
+        result,
+        CommunityDriftState(
+            baseline_modularity=current_modularity,
+            current_modularity=current_modularity,
+        ),
+        (),
+    )
 
 
 def _rerun_global(

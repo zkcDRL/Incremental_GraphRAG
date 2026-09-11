@@ -7,6 +7,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from graphrag_storage.tables.neo4j_table_provider import Neo4jTableProvider
 from graphrag_storage.tables.table_provider import TableProvider
 
 from graphrag.config.models.graph_rag_config import GraphRagConfig
@@ -36,9 +37,24 @@ async def run_workflow(
         "covariates"
     ) and await delta_table_provider.has("covariates"):
         logger.info("Updating Covariates")
-        await _update_covariates(
-            previous_table_provider, delta_table_provider, output_table_provider
-        )
+        if isinstance(output_table_provider, Neo4jTableProvider) and isinstance(
+            delta_table_provider, Neo4jTableProvider
+        ):
+            delta_covariates = await DataReader(delta_table_provider).covariates()
+            initial_id = (
+                await output_table_provider.max_numeric_property(
+                    "covariates", "human_readable_id"
+                )
+                + 1
+            )
+            delta_covariates["human_readable_id"] = np.arange(
+                initial_id, initial_id + len(delta_covariates)
+            )
+            await output_table_provider.upsert_dataframe("covariates", delta_covariates)
+        else:
+            await _update_covariates(
+                previous_table_provider, delta_table_provider, output_table_provider
+            )
 
     logger.info("Workflow completed: update_covariates")
     return WorkflowFunctionOutput(result=None)

@@ -12,7 +12,10 @@ from graphrag.data_model.schemas import RELATIONSHIPS_FINAL_COLUMNS
 
 
 def _update_and_merge_relationships(
-    old_relationships: pd.DataFrame, delta_relationships: pd.DataFrame
+    old_relationships: pd.DataFrame,
+    delta_relationships: pd.DataFrame,
+    *,
+    initial_human_readable_id: int | None = None,
 ) -> pd.DataFrame:
     """Update and merge relationships.
 
@@ -38,7 +41,13 @@ def _update_and_merge_relationships(
     ].astype(int)
 
     # Adjust delta_relationships IDs to be greater than any in old_relationships
-    initial_id = old_relationships["human_readable_id"].max() + 1
+    initial_id = initial_human_readable_id
+    if initial_id is None:
+        initial_id = (
+            int(old_relationships["human_readable_id"].max()) + 1
+            if not old_relationships.empty
+            else 0
+        )
     delta_relationships["human_readable_id"] = np.arange(
         initial_id, initial_id + len(delta_relationships)
     )

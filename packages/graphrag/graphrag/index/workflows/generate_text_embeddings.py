@@ -4,6 +4,7 @@
 """A module containing run_workflow method definition."""
 
 import logging
+from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -104,6 +105,10 @@ async def generate_text_embeddings(
     callbacks: WorkflowCallbacks,
     model: "LLMEmbedding",
     tokenizer: "Tokenizer",
+    vector_write_batch_size: int | None = None,
+    request_batch_sizes: Mapping[str, int] | None = None,
+    batch_max_tokens: int | None = None,
+    num_threads: int | None = None,
 ) -> None:
     """Generate text embeddings for all configured fields."""
     embedded_fields = config.embed_text.names
@@ -128,6 +133,10 @@ async def generate_text_embeddings(
         )
         vector_store.connect()
 
+        request_batch_size = (request_batch_sizes or {}).get(
+            field_name, config.embed_text.batch_size
+        )
+
         async with AsyncExitStack() as stack:
             input_table = await stack.enter_async_context(
                 table_provider.open(
@@ -149,11 +158,12 @@ async def generate_text_embeddings(
                 model=model,
                 tokenizer=tokenizer,
                 embed_column=field_config.embed_column,
-                batch_size=config.embed_text.batch_size,
-                batch_max_tokens=config.embed_text.batch_max_tokens,
-                num_threads=config.concurrent_requests,
+                batch_size=request_batch_size,
+                batch_max_tokens=batch_max_tokens or config.embed_text.batch_max_tokens,
+                num_threads=num_threads or config.concurrent_requests,
                 vector_store=vector_store,
                 output_table=output_table,
+                vector_write_batch_size=vector_write_batch_size,
             )
 
         logger.info(
